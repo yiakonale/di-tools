@@ -8,7 +8,7 @@ classdef powerstage
       Coss {mustBeNumeric} % - in farad - Output capacitance
       RgInt {mustBeNumeric} % - in ohm - Internal gate resistor
       mOut {mustBeNumeric} % - I/VCE - output characteristic slope
-      bOut {mustBeNumeric} % - in volt - output characteristic y-intercept
+      bOut {mustBeNumeric} % - in amps - output characteristic y-intercept
    end
    methods
       function cgs = Cgs(obj)
