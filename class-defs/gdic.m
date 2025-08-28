@@ -4,6 +4,7 @@ classdef gdic
       RoutL {mustBeNumeric} % - in ohm - Output pull-down resistance
       IoutH {mustBeNumeric} % - in amps - Peak source current
       IoutL {mustBeNumeric} % - in amps - Peak sink current
+      Iq {mustBeNumeric} % - in amps - driver output side quiescent current (worst case)
       Pd {mustBeNumeric} % - in watt - Maximum power dissipation by output side
       Ichg {mustBeNumeric} % - in amps - Blanking capacitor charge current
       Vdesat {mustBeNumeric} % - in volt - Desat Detection Threshold

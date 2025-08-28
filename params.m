@@ -5,6 +5,7 @@ ucc21750.RoutH = 2.5;
 ucc21750.RoutL = 0.3;
 ucc21750.IoutH = 10;
 ucc21750.IoutL = 10;
+ucc21750.Iq = 0.005;
 ucc21750.Pd = 965e-3;
 ucc21750.Ichg = 500e-6;
 ucc21750.Vdesat = 9.15;
