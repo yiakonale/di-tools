@@ -13,6 +13,16 @@ classdef gdic
       tDesatOff {mustBeNumeric} % - in sec - DESAT propagation delay to OUT(L) 90%
    end
    methods
+       function obj = gdic(params)
+         if nargin == 1 && isstruct(params)
+             fn = fieldnames(params);
+             for k = 1:numel(fn)
+                 if isprop(obj, fn{k})
+                     obj.(fn{k}) = params.(fn{k});
+                 end
+             end
+         end
+       end
       %function r = roundOff(obj)
        %  r = round([obj.Value],2);
       %end
