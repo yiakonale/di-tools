@@ -12,6 +12,18 @@ params.UCC21750.tDesatLEB = 200e-9;
 params.UCC21750.tDesatFilt = 140e-9;
 params.UCC21750.tDesatOff = 200e-9;
 
+params.UCC21755.RoutH = 2.5;
+params.UCC21755.RoutL = 0.3;
+params.UCC21755.IoutH = 10;
+params.UCC21755.IoutL = 10;
+params.UCC21755.Iq = 0.005;
+params.UCC21755.Pd = 965e-3;
+params.UCC21755.Ichg = 500e-6;
+params.UCC21755.Vdesat = 5;
+params.UCC21755.tDesatLEB = 200e-9;
+params.UCC21755.tDesatFilt = 140e-9;
+params.UCC21755.tDesatOff = 200e-9;
+
 params.UCC5870.RoutH = 0.33;
 params.UCC5870.RoutL = 0.33;
 params.UCC5870.IoutH = 15;
