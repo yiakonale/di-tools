@@ -36,6 +36,30 @@ params.UCC5870.tDesatLEB = 158e-9;
 params.UCC5870.tDesatFilt = [];  % - variable
 params.UCC5870.tDesatOff = 160e-9;
 
+params.GD3160.RoutH = 0.8;
+params.GD3160.RoutL = 0.5;
+params.GD3160.IoutH = 19;
+params.GD3160.IoutL = 19;
+params.GD3160.Iq = 0.011;
+params.GD3160.Pd = 380e-3;
+params.GD3160.Ichg = [];        % - variable
+params.GD3160.Vdesat = [];      % - variable
+params.GD3160.tDesatLEB = [];   % - variable
+params.GD3160.tDesatFilt = [];  % - variable
+params.GD3160.tDesatOff = 30e-9;
+
+params.I1EDI3025AS.RoutH = 0.3;
+params.I1EDI3025AS.RoutL = 0.07;
+params.I1EDI3025AS.IoutH = 20;
+params.I1EDI3025AS.IoutL = 20;
+params.I1EDI3025AS.Iq = 0.011;
+params.I1EDI3025AS.Pd = [];
+params.I1EDI3025AS.Ichg = 500e-6;
+params.I1EDI3025AS.Vdesat = 9;
+params.I1EDI3025AS.tDesatLEB = 260e-9;
+params.I1EDI3025AS.tDesatFilt = 0e-9;
+params.I1EDI3025AS.tDesatOff = 180e-9;
+
 %% Powerstage
 
 params.FS200R12PT4.Type = "IGBT";
