@@ -84,6 +84,17 @@ params.FS200R07A5E3_S6.RgInt = 2;
 params.FS200R07A5E3_S6.mOut = 400;
 params.FS200R07A5E3_S6.bOut = -368;
 
+params.FS225R12OE4.Type = "IGBT";
+params.FS225R12OE4.Qg = 1.55e-6;
+params.FS225R12OE4.VgeH = 15;
+params.FS225R12OE4.VgeL = -15;
+params.FS225R12OE4.Ciss = 13e-9;
+params.FS225R12OE4.Crss = 0.705e-9;
+params.FS225R12OE4.Coss = [];
+params.FS225R12OE4.RgInt = 3.3;
+params.FS225R12OE4.mOut = 275;
+params.FS225R12OE4.bOut = -285;
+
 params.FS02MR12A8MA2B.Type = "SiC";
 params.FS02MR12A8MA2B.Qg = 1.19e-6;
 params.FS02MR12A8MA2B.VgeH = 18;
