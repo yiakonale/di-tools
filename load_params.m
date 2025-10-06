@@ -95,16 +95,38 @@ params.FS225R12OE4.RgInt = 3.3;
 params.FS225R12OE4.mOut = 275;
 params.FS225R12OE4.bOut = -285;
 
-params.FS02MR12A8MA2B.Type = "SiC";
-params.FS02MR12A8MA2B.Qg = 1.19e-6;
-params.FS02MR12A8MA2B.VgeH = 18;
-params.FS02MR12A8MA2B.VgeL = -5;
-params.FS02MR12A8MA2B.Ciss = 34.5e-9;
-params.FS02MR12A8MA2B.Crss = 0.1e-9;
-params.FS02MR12A8MA2B.Coss = 1.26e-9;
-params.FS02MR12A8MA2B.RgInt = [];
-params.FS02MR12A8MA2B.mOut = [];
-params.FS02MR12A8MA2B.bOut = [];
+params.FS300R12OE4.Type = "IGBT";
+params.FS300R12OE4.Qg = 2.25e-6;
+params.FS300R12OE4.VgeH = 15;
+params.FS300R12OE4.VgeL = -15;
+params.FS300R12OE4.Ciss = 18.5e-9;
+params.FS300R12OE4.Crss = 1.05e-9;
+params.FS300R12OE4.Coss = [];
+params.FS300R12OE4.RgInt = 2.5;
+params.FS300R12OE4.mOut = 400;
+params.FS300R12OE4.bOut = -390;
+
+params.FS380R12A6T4B.Type = "IGBT";
+params.FS380R12A6T4B.Qg = 1.75e-6;
+params.FS380R12A6T4B.VgeH = 15;
+params.FS380R12A6T4B.VgeL = -8;
+params.FS380R12A6T4B.Ciss = 19e-9;
+params.FS380R12A6T4B.Crss = 0.81e-9;
+params.FS380R12A6T4B.Coss = [];
+params.FS380R12A6T4B.RgInt = 2.5;
+params.FS380R12A6T4B.mOut = 400;
+params.FS380R12A6T4B.bOut = -400;
+
+params.FS410R12A7P1B.Type = "IGBT";
+params.FS410R12A7P1B.Qg = 2.95e-6;
+params.FS410R12A7P1B.VgeH = 15;
+params.FS410R12A7P1B.VgeL = -8;
+params.FS410R12A7P1B.Ciss = 24.6e-9;
+params.FS410R12A7P1B.Crss = 1.06e-9;
+params.FS410R12A7P1B.Coss = 1.7e-9;
+params.FS410R12A7P1B.RgInt = 0.5;
+params.FS410R12A7P1B.mOut = 1000;
+params.FS410R12A7P1B.bOut = -1150;
 
 params.ADP280120W3.Type = "SiC";
 params.ADP280120W3.Qg = 0.629e-6;
@@ -127,6 +149,17 @@ params.ADP360120W3.Coss = 1.07e-9;
 params.ADP360120W3.RgInt = [];
 params.ADP360120W3.mOut = [];
 params.ADP360120W3.bOut = [];
+
+params.FS02MR12A8MA2B.Type = "SiC";
+params.FS02MR12A8MA2B.Qg = 1.19e-6;
+params.FS02MR12A8MA2B.VgeH = 18;
+params.FS02MR12A8MA2B.VgeL = -5;
+params.FS02MR12A8MA2B.Ciss = 34.5e-9;
+params.FS02MR12A8MA2B.Crss = 0.1e-9;
+params.FS02MR12A8MA2B.Coss = 1.26e-9;
+params.FS02MR12A8MA2B.RgInt = [];
+params.FS02MR12A8MA2B.mOut = [];
+params.FS02MR12A8MA2B.bOut = [];
 
 %% PCBA
 
