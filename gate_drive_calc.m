@@ -15,7 +15,7 @@ fsw = 20e3; % - switching frequency
 %% Minimum gate resistor
 
 Ltot = pcb.Lgs + pwr.Lgs();
-%Ltot = 60.1*10^-9; % - in nH - total stray inductance
+%Ltot = 60.1*10^-9; % - in nH - total loop inductance
 
 rmin = 2*sqrt(Ltot/pwr.Ciss);
 disp("Minimum gate resistance is " + round(rmin,1) + " ohm");
