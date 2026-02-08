@@ -28,6 +28,6 @@ The gate driver calculator uses the following files:
 
 ### 2. Discharge resistor calculator
 
-* `discharge_res_calc.mlx` - calculator intended for analyzing resistor arrays used to safely discharge high-voltages.
+* `discharge_res_calc.mlx` - calculator intended for designing and analyzing resistor arrays used to safely discharge high-voltages.
 
-You can define individual package resistance, series and parallel configuration and input voltage, and calculate per resistor voltage drop, current and power dissipated, as well as equivalent resistance, total current and power. Optionally, you can define a discharge capacitance to calculate the RC time constant and time taken to discharge the bus to low-voltage.
+This script searches all feasible series–parallel resistor combinations using standard E24/E48 values to safely discharge a capacitor within a required time, checking worst-case power and voltage stress on each resistor. Additionally, you can define individual package resistance, series and parallel configuration and input voltage, and calculate per resistor voltage drop, current and power dissipated, as well as equivalent resistance, total current and power for a given discharge array combination.
