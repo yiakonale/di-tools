@@ -8,7 +8,7 @@ function S = dptSettings(overrides)
 %   OVERRIDES must already exist in the defaults, so a misspelled field
 %   is an error rather than a silently ignored setting. Example:
 %
-%       ov.gate.nominal.high = 15;
+%       ov.gate.levels.tolerance = 0.5;
 %       S = dptSettings(ov);
 %
 %   Always construct settings through this function; do not edit fields
@@ -16,9 +16,9 @@ function S = dptSettings(overrides)
 %
 %   Scope
 %     This file holds analyzer-wide behaviour only. Bucket configuration
-%     (bucket path, active device, expected pulse count) lives in
-%     dpt_analyzer.m; channel assignments live in each collection's
-%     channelMap.m.
+%     (bucket path, active device, expected pulse count, nominal gate
+%     drive levels) lives in dpt_analyzer.m; channel assignments live in
+%     each collection's channelMap.m.
 %
 %   Conventions
 %     All values are SI (V, A, s). Fractions are unitless in [0, 1].
@@ -54,16 +54,29 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.1.0";
+S.schemaVersion = "0.2.0";
+
+%% Canonical signals --------------------------------------------------
+% The semantic signal namespace used by channel maps and measurements.
+%   name     : canonical name used in channelMap.m
+%   quantity : physical role, so measurements can request e.g. "the
+%              drainVoltage of the active device" without naming signals
+%   device   : "HS" | "LS" | "" (not device-specific)
+%   units    : required verticalUnits of the scope export
+S.signals.catalog = table( ...
+    ["Vgs-HS"; "Vgs-LS"; "Vds-HS"; "Vds-LS"; "Id-HS"; "Id-LS"; "Iout"], ...
+    ["gateVoltage"; "gateVoltage"; "drainVoltage"; "drainVoltage"; ...
+     "drainCurrent"; "drainCurrent"; "outputCurrent"], ...
+    ["HS"; "LS"; "HS"; "LS"; "HS"; "LS"; ""], ...
+    ["V"; "V"; "V"; "V"; "A"; "A"; "A"], ...
+    'VariableNames', {'name', 'quantity', 'device', 'units'});
 
 %% Gate drive ---------------------------------------------------------
-% Nominal drive levels of the ACTIVE device's gate. Used to validate the
-% gate channel and to sanity-check the levels measured from the
-% waveform. Detection thresholds are computed from MEASURED levels, not
-% from these values, so probe offset or driver droop does not bias
-% timing.
-S.gate.nominal.high = 18;      % [V]  on-state gate drive
-S.gate.nominal.low  = -5;      % [V]  off-state gate drive
+% The nominal drive levels vary between test setups (+15/-15 V to
+% +20/-5 V), so they are bucket configuration (dpt_analyzer.m), not
+% settings. Detection thresholds are computed from the MEASURED levels;
+% the nominal levels only validate the gate channel and seed the level
+% estimate.
 
 % Gate polarity. "high" means the device conducts when Vgs is high
 % (n-channel MOSFET, IGBT, GaN HEMT), so a rising gate edge is a
@@ -75,14 +88,16 @@ S.gate.activeLevel = "high";   % "high" | "low"
 %               samples on each side of the nominal midpoint). Requires
 %               no time constants; valid when the record spends most of
 %               its time at the two drive levels, as a DPT record does.
-%   "nominal" : use S.gate.nominal directly (diagnostic use only).
+%   "nominal" : use the bucket's nominal levels directly (diagnostic
+%               use only).
 S.gate.levels.source = "measured";
 
 % Maximum allowed |measured - nominal| for each level. Exceeding it
 % means the channel is probably not the active gate (wrong mapping,
-% passive device's gate, wrong probe attenuation), or the nominal
-% levels above are wrong for this setup.
-S.gate.levels.tolerance = 1.5;             % [V]
+% passive device's gate, wrong probe attenuation), or the bucket's
+% nominal levels are wrong for this setup. Must be smaller than half
+% the nominal swing; that check is made against the bucket config.
+S.gate.levels.tolerance = 1.0;             % [V]
 S.gate.levels.onMismatch = "error";        % "error" | "warn"
 
 %% Gate-transition detection ------------------------------------------
@@ -285,19 +300,32 @@ function validateSettings(S)
 % Check types, ranges and cross-field consistency. Errors identify the
 % offending field so a bad override is easy to locate.
 
-% Gate
-mustBeRealScalar(S.gate.nominal.high, 'gate.nominal.high');
-mustBeRealScalar(S.gate.nominal.low,  'gate.nominal.low');
-if S.gate.nominal.high <= S.gate.nominal.low
-    fail('gate.nominal', 'high must be greater than low.');
+% Signals
+C = S.signals.catalog;
+if ~istable(C) || ~all(ismember({'name', 'quantity', 'device', 'units'}, ...
+        C.Properties.VariableNames))
+    fail('signals.catalog', 'must be a table with variables name, quantity, device, units.');
 end
+if ~isstring(C.name) || any(C.name == "") || numel(unique(C.name)) ~= height(C)
+    fail('signals.catalog', 'names must be unique, non-empty strings.');
+end
+if ~isstring(C.device) || ~all(ismember(C.device, ["HS", "LS", ""]))
+    fail('signals.catalog', 'device must be "HS", "LS" or "".');
+end
+if ~isstring(C.units) || ~all(ismember(C.units, ["V", "A"]))
+    fail('signals.catalog', 'units must be "V" or "A".');
+end
+for dev = ["HS", "LS"]
+    if sum(C.quantity == "gateVoltage" & C.device == dev) ~= 1
+        fail('signals.catalog', sprintf( ...
+            'must define exactly one gateVoltage signal for device %s.', dev));
+    end
+end
+
+% Gate
 mustBeOption(S.gate.activeLevel, ["high", "low"], 'gate.activeLevel');
 mustBeOption(S.gate.levels.source, ["measured", "nominal"], 'gate.levels.source');
 mustBePositiveScalar(S.gate.levels.tolerance, 'gate.levels.tolerance');
-if S.gate.levels.tolerance >= (S.gate.nominal.high - S.gate.nominal.low) / 2
-    fail('gate.levels.tolerance', ...
-        'must be smaller than half the nominal swing, or the two levels cannot be distinguished.');
-end
 mustBeOption(S.gate.levels.onMismatch, ["error", "warn"], 'gate.levels.onMismatch');
 
 % Detection
@@ -330,17 +358,9 @@ switch R.strategy
             fail('detection.hysteresis', 'must bracket 0.5 for the midpoint strategy.');
         end
     case "absolute"
+        % Whether the level lies inside the hysteresis band depends on
+        % the measured gate levels, so that check happens at detection.
         mustBeRealScalar(R.absolute, 'detection.reference.absolute');
-        % Checked against MEASURED levels at detection time; here only
-        % against the nominal arms as an early sanity check.
-        swing = S.gate.nominal.high - S.gate.nominal.low;
-        armLo = S.gate.nominal.low + lo * swing;
-        armHi = S.gate.nominal.low + hi * swing;
-        if ~(R.absolute > armLo && R.absolute < armHi)
-            fail('detection.reference.absolute', sprintf( ...
-                'must lie inside the nominal hysteresis band (%.3g V, %.3g V).', ...
-                armLo, armHi));
-        end
 end
 mustBeOption(R.crossingSelection, ["last", "first"], ...
     'detection.reference.crossingSelection');

@@ -7,8 +7,8 @@ Newest entries go at the top of each section. Every completed step is committed 
 
 | Batch | Scope | Status |
 |---|---|---|
-| 1 | `dptSettings.m` | **In review** |
-| 2 | Data contracts (`importChannel`, `importCollection`, timeline) | Not started |
+| 1 | `dptSettings.m` | Approved (2026-10-12) |
+| 2 | Data contracts (`importChannel`, `importCollection`, timeline) | **In progress** |
 | 3 | Import & validation implementation | Not started |
 | 4 | Gate detection & synchronization | Not started |
 | 5 | Measurement specification & registry | Not started (waiting on user's spec) |
@@ -17,10 +17,16 @@ Newest entries go at the top of each section. Every completed step is committed 
 
 ## Open questions (waiting on user)
 
-- **Nominal gate levels:** set to −5 / +18 V from the test record (measured −5.43 / +17.40 V). The earlier draft had +20 V, which would be 2.6 V off this record. Confirm the real driver levels, and whether they vary between buckets (if so, they belong in bucket config instead).
-- **Test data in git:** `testdata/` (8 × 20 MB `.mat`) is committed. Decide whether `data/` should be committed or gitignored.
+_None outstanding for Batch 1._
 
 ## Decision record
+
+### 2026-10-12 — Batch 1 review outcome
+
+- **Nominal gate levels moved to bucket config.** The user's setups range from +15/−15 V to +20/−5 V. `S.gate.nominal` was removed; `dpt_analyzer.m` will supply `cfg.gate.nominal.high/low`. The check that tolerance is less than half the swing moves to bucket-config validation (Batch 3). The sanity check on the absolute reference level moves to detection time, where the measured levels are known.
+- **Level tolerance set to 1.0 V** (user decision).
+- **Example data stays committed** (user decision).
+- **Added `S.signals.catalog`**: a table of canonical name, quantity, device and units. It is the single definition of the signal namespace, used for channel-map validation, unit checks at import, and role-based measurement requirements. Schema version is now 0.2.0.
 
 ### 2026-10-12 — Batch 1: settings
 
