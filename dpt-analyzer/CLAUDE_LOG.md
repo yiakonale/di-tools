@@ -15,14 +15,33 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
-## Open questions (waiting on user)
+## Resume here
 
-Batch 2 (details in [DATA_CONTRACTS.md §8](DATA_CONTRACTS.md)):
+_Last session ended 2026-10-13. Every step is committed locally._
 
-Batch 4 review points:
+**State:**
+- Batches 1–3 are approved. Batch 4 (detection, alignment, timeline) is implemented and in review.
+- Running `dpt_analyzer.m` executes workflow steps 1–6 end to end on `data/example`: 10 pulses, 20 edges, 20/20 windows usable.
 
-- **Provisional window margins:** `S.windows.adaptive.pre = 1`, `post = 2` (multiples of the gate-edge duration D). Revisit in Batch 5 when the measurement thresholds are known. IGBT tail current may need a larger `post`.
-- ~~Sequence-mismatch default~~ → resolved: see the acquisition model (2026-10-13).
+**Before continuing:**
+- Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync` (38 + 31 cases, plus the settings checks).
+
+**Next step: Batch 5.**
+- Waiting on the user's measurement specification: the quantities, their threshold definitions, required signals, and output fields.
+- Then design `measurements/measurementRegistry.m` and the measurement functions.
+- Do not implement any measurements before the specification arrives.
+
+**Open points:**
+- **Window margins are provisional.** `S.windows.adaptive.pre = 1`, `post = 2` (multiples of the gate-edge duration D). Revisit them against the Batch 5 threshold definitions; IGBT tail current may need a larger `post`.
+- **`S.alignment.maxResidual` is unset.** Calibrate it once a real bucket with two or more collections exists: the residuals will show the real shot-to-shot gate jitter.
+- **Batch 7 note:** the `clear` in `dpt_analyzer.m` wipes the caller's workspace, so tests must not `run` it from inside a function and expect that function's variables to survive.
+
+**Working agreements:**
+- Commit locally after every step. Stage only `dpt-analyzer/` paths: the parent `di/` repo has unrelated modified `.mlx` files.
+- The user pushes to the remote themselves.
+- Batches go out for review and pause for feedback.
+- MATLAB R2024b is at `C:\Program Files\MATLAB\R2024bin\matlab` (`-batch` works). The Signal Processing Toolbox is **not** installed.
 
 ## File map
 
