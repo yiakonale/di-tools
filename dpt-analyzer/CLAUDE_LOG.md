@@ -19,11 +19,24 @@ Newest entries go at the top of each section. Every completed step is committed 
 
 Batch 2 (details in [DATA_CONTRACTS.md §8](DATA_CONTRACTS.md)):
 
-- **Q1:** Are deskew and current-probe polarity corrected in the scope? If not, the channel map gains `deskew` and `invert` fields.
-- **Q2:** Invalid collection: abort the bucket, or exclude it and continue? (Recommended: exclude and continue.)
-- **Q3:** What is the channel-to-signal mapping in `testdata/`, and which device is active?
+- **Q1a:** non-integer deskew policy. Options: `"round"` (proposed default) or `"error"`.
+- **Confirm:** CH7 (inductor current) maps to `Iout`.
 
 ## Decision record
+
+### 2026-10-13 — Batch 2 review round 1
+
+- **Q1 → post-acquisition corrections.** The scope applies deskew and inversion by default. `channelMap.m` can add per-channel `deskew` [s] and `invert` corrections on top (defaults 0 / false).
+  - Deskew follows the Tek sign convention: positive delays the channel, `t_ch = t_s + deskew`.
+  - Corrections are applied only when a signal is read, through a new `getSignal.m` accessor. That accessor is the single place samples are read; raw data is never rewritten.
+  - All downstream times are corrected times.
+  - Windows now hold only times, no sample indices, because with deskew the indices differ per channel.
+- **Q1a open: non-integer deskew.** Proposed: round it to a whole number of samples (residual ≤ 80 ps at 160 ps sampling, reported). V and I then share a time grid, so products like V·I need no interpolation.
+- **Q2 → exclude and continue.** An invalid collection is excluded and reported. The run aborts only if no valid collection remains.
+- **Q3 → test-data mapping.** LS is the active device.
+  - CH1 = Vgs-HS, CH2 = Vgs-LS, CH3 = Vds-LS, CH4 = Vds-HS.
+  - MATH1 = Id-LS: the sum of the parallel-device currents CH5 and CH8, which stay unmapped.
+  - CH7 = inductor current, assumed to be Iout.
 
 ### 2026-10-12 — Batch 2: data contracts proposed
 
