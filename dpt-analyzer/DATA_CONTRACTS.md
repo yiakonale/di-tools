@@ -1,6 +1,6 @@
 # DPT Analyzer — Data Contracts
 
-Status: **approved 2026-10-13. Sections 0–4 are implemented (Batch 3).** This document is the reference that Batches 3–6 implement against. A change here must be agreed before the code changes.
+Status: **approved 2026-10-13. Sections 0–4 are implemented (Batch 3); sections 5–7 are implemented (Batch 4, in review).** This document is the reference that Batches 3–6 implement against. A change here must be agreed before the code changes.
 
 ## 0. Conventions
 
@@ -189,6 +189,8 @@ One `ev` per collection, in that collection's **corrected time** of the gate cha
 |---|---|---|
 | `collection` | string | `col.name` |
 | `signal` | string | The gate signal used, e.g. `"Vgs-LS"`. |
+| `sampleInterval` | double [s] | The collection's dt. |
+| `recordSpan` | 1×2 double [s] | First and last corrected gate time. Used for window coverage. |
 | `levels.low`, `levels.high` | double [V] | Levels actually used (measured, or nominal if `S.gate.levels.source = "nominal"`). |
 | `levels.nominalLow`, `levels.nominalHigh` | double [V] | Copied from `cfg`. |
 | `thresholds.armLow`, `.armHigh` | double [V] | Hysteresis arms. |
@@ -208,21 +210,34 @@ One `ev` per collection, in that collection's **corrected time** of the gate cha
 | `index` | double | Raw gate-channel index k such that the crossing lies between samples k and k+1. |
 | `startIndex` | double | Last sample at or beyond the near arm before the edge. |
 | `endIndex` | double | First sample at or beyond the far arm. |
-| `nCrossings` | double | Reference crossings within `[startIndex, endIndex]`. |
+| `startTime`, `endTime` | double [s] | Corrected times of `startIndex` and `endIndex`. Their difference is the edge duration **D**. |
+| `nCrossings` | double | Reference crossings within `[startIndex, endIndex]`, counted on the timing-smoothed signal. |
+| `smoothingSamples` | double | Length of the local timing moving mean (odd; 1 = none), `≈ S.detection.timingSmoothing · D / dt`. |
 
 ## 6. Alignment — `al = alignCollections(evs, S)`
 
-Input: `evs`, a 1×C array of gate-event structs.
+Input: `evs`, a 1×C array of gate-event structs. Collections that cannot be aligned are **excluded** and listed in `excluded`. Every per-collection field covers only the C' aligned collections, in input order.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `collections` | 1×C string | Collection names, in `evs` order. |
-| `reference` | double | Index of the reference collection. It defines `t_u = 0`. |
-| `offset` | 1×C double [s] | `t_u = t_ch − offset(c)`. |
-| `match` | E×C double | Row j = universal edge j. Entry = row in `evs(c).edges`, or `NaN` if absent. |
-| `residual` | E×C double [s] | Aligned edge time minus the universal edge time. `NaN` where absent. |
-| `sampleInterval` | 1×C double [s] | For reporting dt mismatches across collections. |
+| `collections` | 1×C' string | Names of the aligned collections. |
+| `sourceIndex` | 1×C' double | Their indices into the input `evs`. Use it to filter `collections` and `evs` downstream. |
+| `reference` | double | Index (into `collections`) of the reference collection. It defines `t_u = 0`. |
+| `offset` | 1×C' double [s] | `t_u = t_ch − offset(c)`. |
+| `edges` | table, E rows | Universal edges: `direction`, `kind`, `time`. `time` is the median aligned time over the collections that contain the edge. |
+| `match` | E×C' double | Row j = universal edge j. Entry = row in `evs(c).edges`, or `NaN` if absent. |
+| `residual` | E×C' double [s] | Aligned edge time minus `edges.time`. `NaN` where absent. |
+| `sampleInterval` | 1×C' double [s] | For reporting dt mismatches across collections. |
+| `excluded` | struct array | `name`, `reason`. |
 | `issues` | struct array | §0.1 |
+
+**Algorithm:**
+
+1. **Reference collection.** Each collection's edge sequence is its order of turn-on and turn-off edges. The reference is a collection with the most common sequence; ties go to the one with more edges, then to input order. Its edges define the universal edge list.
+2. **Matching.** Collections with the reference's sequence are matched edge by edge. For the others, `S.alignment.onSequenceMismatch` decides:
+   - `"exclude"` (default): exclude the collection.
+   - `"matchByTiming"`: every same-kind edge pair proposes an offset. Each offset is scored by how many reference edges then have a counterpart within half the smallest reference edge spacing. The best score must come from exactly **one** distinct offset; otherwise the match is ambiguous and the collection is excluded. A strictly periodic train truncated differently is the typical ambiguous case.
+3. **Offset estimation.** The offset is estimated from the per-edge differences with `S.alignment.offsetEstimator`. The scope trigger time serves only as a sanity check: a warning is raised if the edge-based offset exceeds half the edge spacing.
 
 ## 7. Timeline — `tl = buildPulseTimeline(evs, al, cfg, S)`
 
@@ -246,7 +261,7 @@ Input: `evs`, a 1×C array of gate-event structs.
 | `direction` | string | `"rising"` \| `"falling"` |
 | `kind` | string | `"turnOn"` \| `"turnOff"` |
 | `pulseIndex` | double | Pulse this edge belongs to, or `NaN`. |
-| `time` | double [s] | Consensus universal time across collections. Its exact definition is set in Batch 4. |
+| `time` | double [s] | Copied from `al.edges.time`: the median aligned time across collections. |
 
 `pulses` columns:
 
@@ -266,10 +281,21 @@ A pulse is the p-th turn-on together with the turn-off that follows it. A turn-o
 | `edgeId` | double | Edge the window belongs to. |
 | `collection` | double | Index into `al.collections`. |
 | `startTime`, `endTime` | double [s] | Universal time. For collection c, the corrected-time range passed to `getSignal` is `[startTime endTime] + offset(c)`. Windows hold no sample indices, because with deskew the indices differ per channel. |
-| `method` | string | `"adaptive"` \| `"fallback"` |
+| `coreStartTime`, `coreEndTime` | double [s] | Universal time of the collection's qualified gate edge (`startTime`/`endTime` from §5). This is the core where the switching happens. |
+| `method` | string | `"adaptive"` \| `"fixed"` \| `"fallback"` |
+| `limited` | logical | Clipped to the midpoint between neighbouring edges. |
 | `truncated` | logical | Clipped at the record boundary. |
 | `valid` | logical | `false` if unusable (e.g. `"skip"` coverage policy). |
 | `note` | string | Reason for fallback, truncation or invalidity. |
+
+Window construction, for each (edge, collection):
+
+1. **Core:** the qualified gate edge, of duration D.
+2. **Primary window:**
+   - `"adaptive"`: `[coreStart − pre·D, coreEnd + post·D]` (`S.windows.adaptive`; provisional defaults pre = 1, post = 2);
+   - `"fixed"`: edge time + `S.windows.fixed.<kind>`.
+3. **Limit to the neighbour midpoints** if `S.windows.limitToNeighborMidpoint`.
+4. **Coverage.** If the window exceeds the record, the fixed window is used instead as a `"fallback"`, provided it is defined, `S.windows.useFixedAsFallback` is set, and it fits. Otherwise `S.windows.onInsufficientCoverage` applies (`"skip"` makes the window invalid; `"truncate"` clips it).
 
 Windows are per collection because record coverage differs between collections. A measurement on collection c uses only rows where `collection == c`. This keeps the same-collection rule visible in the data itself.
 

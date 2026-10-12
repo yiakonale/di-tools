@@ -54,7 +54,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.3.0";
+S.schemaVersion = "0.4.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -146,6 +146,17 @@ S.detection.reference.crossingSelection = "last";
 % Linear interpolation between the two samples bracketing the crossing.
 S.detection.interpolateCrossing = true;
 
+% Timing smoothing: each qualified edge is timed on a local, centred
+% (zero-phase) moving mean of length timingSmoothing * D, where D is that
+% edge's duration between the hysteresis arms. Scaling with D keeps the
+% filter appropriate for any gate speed (us IGBT edges to ns GaN edges).
+% 0 disables it. Default 0.04 from the test record (a copy with extra
+% gate noise vs the clean copy, same filter): timing error 2.88 ns
+% unsmoothed, 0.64 / 0.16 / 0.053 / 0.14 ns at 0.005 / 0.02 / 0.04 /
+% 0.08; bias on a noise-free edge 0.02 ns at 0.04, rising to 0.19 ns at
+% 0.16. Any bias common to all collections cancels in alignment.
+S.detection.timingSmoothing = 0.04;        % [-] fraction of D
+
 % Warn when a qualified edge has more than this many reference
 % crossings (1 = any recrossing warns). Indicates a poorly chosen
 % reference level or excessive noise.
@@ -162,7 +173,9 @@ S.detection.minEdgeSpacing = [];           % [s]
 % timing. Only base-MATLAB methods are offered: the Signal Processing
 % Toolbox is not assumed to be installed.
 %   "none"     : no conditioning (default; the hysteresis band is about
-%                100x the measured gate noise on the test record).
+%                100x the measured gate noise on the test record, so edge
+%                qualification needs none). Edge TIMING is smoothed
+%                separately, per edge: S.detection.timingSmoothing.
 %   "movmean"  : centred moving average.
 %   "movmedian": centred moving median (removes isolated spikes while
 %                preserving edges better than a mean).
@@ -196,10 +209,16 @@ S.alignment.timeOrigin = "firstTurnOn";
 %   "firstEdge": offset of the first matched edge only.
 S.alignment.offsetEstimator = "median";
 
-% Behaviour when collections do not contain the same edge sequence
-% (different edge counts or direction order). Matching then cannot be
-% established unambiguously.
-S.alignment.onSequenceMismatch = "error";  % "error" | "warn"
+% Behaviour when a collection's edge sequence (count and order of
+% turn-on/turn-off edges) differs from the reference collection's. The
+% reference is a collection with the most common sequence.
+%   "exclude"      : exclude the collection and report it.
+%   "matchByTiming": match edges by their relative timing (each edge to
+%                    the same-kind edge within half the smallest edge
+%                    spacing). An ambiguous match, e.g. a strictly
+%                    periodic train truncated differently, still
+%                    excludes the collection: it is never guessed.
+S.alignment.onSequenceMismatch = "exclude";
 
 % Maximum allowed per-edge residual after alignment. Residuals are
 % always reported. [] = report only, no pass/fail; the right limit
@@ -210,7 +229,8 @@ S.alignment.maxResidual = [];              % [s]
 % Collections with different sample intervals can still be aligned
 % (alignment is a time offset, not a resampling), and measurements are
 % computed within one collection, so a mismatch is a warning by default.
-S.alignment.onSampleIntervalMismatch = "warn";   % "error" | "warn"
+%   "exclude": exclude the collection.  "warn": report and keep it.
+S.alignment.onSampleIntervalMismatch = "warn";
 
 %% Sampling validation ------------------------------------------------
 % Numerical tolerances only; they absorb floating-point representation
@@ -239,24 +259,38 @@ S.corrections.nonIntegerDeskew = "round";
 S.corrections.integerShiftTol = 1e-6;
 
 %% Measurement windows ------------------------------------------------
-% Windows are anchored to detected gate edges. The construction
-% algorithm is decided in Batch 4; these fields fix the interface.
-
-% Primary construction method. Only the option name is reserved here;
-% its parameters are added when the algorithm is specified.
+% One window per (edge, collection), anchored to that collection's
+% detected gate edge. The window CORE is the qualified gate edge itself:
+% from the last sample at the near hysteresis arm to the first sample at
+% the far arm. Its duration D adapts to the gate drive, device and
+% current. On the test record every Vds/Id 10-90 % transition lies
+% inside the core, and Vds has settled to 5 % by the core's end.
+%
+%   "adaptive": [coreStart - pre*D, coreEnd + post*D]
+%   "fixed"   : reference time + S.windows.fixed.<kind> (override)
 S.windows.method = "adaptive";
+
+% Margins in multiples of D. PROVISIONAL defaults pending the measurement
+% specification (Batch 5): pre gives a settled baseline segment of length
+% D before the edge; post covers ringing and tail current after it.
+S.windows.adaptive.pre  = 1.0;             % [-] multiples of D
+S.windows.adaptive.post = 2.0;             % [-] multiples of D
 
 % Hard limit: a window never extends past the midpoint between its edge
 % and the neighbouring edges, so windows of adjacent transitions never
 % overlap. Derived from the data; needs no constant.
 S.windows.limitToNeighborMidpoint = true;
 
-% Fixed fallback windows relative to the edge reference time,
-% [before, after] in seconds (e.g. [-200e-9, 800e-9]). [] = no fallback:
-% if the primary method fails, the dependent measurements are skipped
-% with a reason. Values depend on the measurement specification.
-S.windows.fallback.turnOn  = [];           % [s] 1x2, before <= 0 <= after
-S.windows.fallback.turnOff = [];           % [s] 1x2
+% Fixed windows relative to the edge reference time, [before, after] in
+% seconds (e.g. [-200e-9, 800e-9]). Required when method is "fixed".
+% [] = not defined. Values depend on the measurement specification.
+S.windows.fixed.turnOn  = [];              % [s] 1x2, before <= 0 <= after
+S.windows.fixed.turnOff = [];              % [s] 1x2
+
+% Use the fixed window as a fallback when the adaptive window does not
+% fit inside the record and the fixed one does. The window is then
+% marked method = "fallback" and reported.
+S.windows.useFixedAsFallback = true;
 
 % A window that would extend past the record boundary.
 %   "skip"    : do not use the window; dependent measurements are skipped.
@@ -380,6 +414,10 @@ end
 mustBeOption(R.crossingSelection, ["last", "first"], ...
     'detection.reference.crossingSelection');
 mustBeLogicalScalar(S.detection.interpolateCrossing, 'detection.interpolateCrossing');
+mustBeFraction(S.detection.timingSmoothing, 'detection.timingSmoothing');
+if S.detection.timingSmoothing >= 0.5
+    fail('detection.timingSmoothing', 'must be well below 0.5 of the edge duration.');
+end
 mustBePositiveInteger(S.detection.maxReferenceCrossings, 'detection.maxReferenceCrossings');
 mustBeEmptyOrPositiveScalar(S.detection.minEdgeSpacing, 'detection.minEdgeSpacing');
 
@@ -403,10 +441,10 @@ mustBeOption(S.pulses.incompleteEdgePolicy, ["discard", "error"], ...
 mustBeOption(S.alignment.timeOrigin, "firstTurnOn", 'alignment.timeOrigin');
 mustBeOption(S.alignment.offsetEstimator, ["median", "mean", "firstEdge"], ...
     'alignment.offsetEstimator');
-mustBeOption(S.alignment.onSequenceMismatch, ["error", "warn"], ...
+mustBeOption(S.alignment.onSequenceMismatch, ["exclude", "matchByTiming"], ...
     'alignment.onSequenceMismatch');
 mustBeEmptyOrPositiveScalar(S.alignment.maxResidual, 'alignment.maxResidual');
-mustBeOption(S.alignment.onSampleIntervalMismatch, ["error", "warn"], ...
+mustBeOption(S.alignment.onSampleIntervalMismatch, ["exclude", "warn"], ...
     'alignment.onSampleIntervalMismatch');
 
 % Sampling
@@ -422,10 +460,16 @@ if S.corrections.integerShiftTol >= 0.5
 end
 
 % Windows
-mustBeOption(S.windows.method, "adaptive", 'windows.method');
+mustBeOption(S.windows.method, ["adaptive", "fixed"], 'windows.method');
+mustBeNonnegativeScalar(S.windows.adaptive.pre,  'windows.adaptive.pre');
+mustBeNonnegativeScalar(S.windows.adaptive.post, 'windows.adaptive.post');
 mustBeLogicalScalar(S.windows.limitToNeighborMidpoint, 'windows.limitToNeighborMidpoint');
-mustBeEmptyOrWindow(S.windows.fallback.turnOn,  'windows.fallback.turnOn');
-mustBeEmptyOrWindow(S.windows.fallback.turnOff, 'windows.fallback.turnOff');
+mustBeEmptyOrWindow(S.windows.fixed.turnOn,  'windows.fixed.turnOn');
+mustBeEmptyOrWindow(S.windows.fixed.turnOff, 'windows.fixed.turnOff');
+if S.windows.method == "fixed" && (isempty(S.windows.fixed.turnOn) || isempty(S.windows.fixed.turnOff))
+    fail('windows.fixed', 'turnOn and turnOff are required when windows.method is "fixed".');
+end
+mustBeLogicalScalar(S.windows.useFixedAsFallback, 'windows.useFixedAsFallback');
 mustBeOption(S.windows.onInsufficientCoverage, ["skip", "truncate"], ...
     'windows.onInsufficientCoverage');
 
@@ -459,6 +503,13 @@ function mustBePositiveScalar(v, field)
 mustBeRealScalar(v, field);
 if v <= 0
     fail(field, 'must be positive.');
+end
+end
+
+function mustBeNonnegativeScalar(v, field)
+mustBeRealScalar(v, field);
+if v < 0
+    fail(field, 'must be non-negative.');
 end
 end
 

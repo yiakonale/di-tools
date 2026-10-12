@@ -12,7 +12,7 @@ cases = {
   'bad option',     struct('detection', struct('reference', struct('strategy', "slope")))
   'cond no window', struct('conditioning', struct('method', "movmean"))
   'abs missing',    struct('detection', struct('reference', struct('strategy', "absolute")))
-  'bad window',     struct('windows', struct('fallback', struct('turnOn', [100e-9 200e-9])))
+  'bad window',     struct('windows', struct('fixed', struct('turnOn', [100e-9 200e-9])))
   'not struct',     5
 };
 for k = 1:size(cases,1)

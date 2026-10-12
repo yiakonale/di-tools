@@ -9,8 +9,8 @@ Newest entries go at the top of each section. Every completed step is committed 
 |---|---|---|
 | 1 | `dptSettings.m` | Approved (2026-10-12) |
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
-| 3 | Import & validation implementation | **In review** |
-| 4 | Gate detection & synchronization | Not started |
+| 3 | Import & validation implementation | Approved (2026-10-13) |
+| 4 | Gate detection & synchronization | **In review** |
 | 5 | Measurement specification & registry | Not started (waiting on user's spec) |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
@@ -19,7 +19,10 @@ Newest entries go at the top of each section. Every completed step is committed 
 
 Batch 2 (details in [DATA_CONTRACTS.md §8](DATA_CONTRACTS.md)):
 
-_None outstanding. Batch 3 awaits review._
+Batch 4 review points:
+
+- **Provisional window margins:** `S.windows.adaptive.pre = 1`, `post = 2` (multiples of the gate-edge duration D). Revisit in Batch 5 when the measurement thresholds are known. IGBT tail current may need a larger `post`.
+- **Sequence-mismatch default** is `"exclude"`. `"matchByTiming"` is available but refuses ambiguous periodic trains.
 
 ## File map
 
@@ -34,10 +37,41 @@ _None outstanding. Batch 3 awaits review._
 | `importCollection.m` | Loads a collection: map, files, shared-timebase checks, corrections. |
 | `getSignal.m` | The single accessor for reading samples; applies deskew and inversion. |
 | `dptIssue.m` | Issue record constructor and echo. |
+| `sync/detectGateTransitions.m` | Measures the gate levels, qualifies edges by hysteresis, times them on a local smoothed copy. |
+| `sync/alignCollections.m` | Chooses the reference collection, matches edges, estimates offsets and residuals, excludes collections that cannot be aligned. |
+| `sync/buildPulseTimeline.m` | Universal edges, pulses, and per-(edge, collection) windows. |
 | `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
-| `tests/` | Informal test scripts (`test_settings`, `test_import`); formalized in Batch 7. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-13 — Batch 4: detection, alignment, timeline implemented
+
+- **Detection on the example record:** 20 edges (10 pulses), 0 discarded, 0 issues. Levels −5.40 / +17.40 V. **Every edge has exactly one reference crossing.**
+- **Timing smoothing (new setting `S.detection.timingSmoothing = 0.04`).**
+  - *Finding:* with gate noise, `"last"` crossing selection is biased late (up to +2.9 ns) and `"first"` early (up to −3.2 ns). Gate noise therefore shifts the alignment.
+  - *Fix:* each qualified edge is timed on a **local, centred moving mean of 4 % of that edge's own duration D**. Scaling with D, rather than using a fixed time, keeps it suitable from µs IGBT edges down to ns GaN edges. Qualification still uses the raw signal and the hysteresis.
+  - *Sweep (noisy vs clean copy, same filter):* error 2.88 ns unsmoothed; 0.64 / 0.40 / 0.16 / **0.053** / 0.14 / 0.21 ns at 0.005 / 0.01 / 0.02 / **0.04** / 0.08 / 0.16. Bias on a noise-free tanh edge is ≤ 0.02 ns up to 0.04, then 0.19 ns at 0.16.
+  - *Result:* a known 37.3 ns (233.125-sample) offset is recovered to **7 ps** with doubled gate noise, against 1.11 ns without smoothing. The noise-free case is exact.
+- **Midpoint stays a poor reference** even with smoothing: 0.36 ns noise error against 0.053 ns for 25 %-from-initial. That confirms the default.
+- **Window design (data-derived).** On the example, every Vds-LS/Id-LS 10–90 % transition lies inside the qualified gate edge (0.11–0.71 of D), and Vds has settled to 5 % before the edge ends. The edge itself is therefore the window **core**. The window adds `pre·D` before and `post·D` after, limited to the neighbour midpoints. A plot of a high-current turn-on and turn-off (edges 17/18) confirms this visually.
+- **Settings 0.4.0:**
+  - `windows.method` is `"adaptive"` | `"fixed"`; added `windows.adaptive.pre/post`; `windows.fallback.*` renamed to `windows.fixed.*`, with `windows.useFixedAsFallback`.
+  - `alignment.onSequenceMismatch` is now `"exclude"` | `"matchByTiming"`, and `alignment.onSampleIntervalMismatch` is `"exclude"` | `"warn"`. This replaces `"error"`, consistent with the Q2 exclusion policy.
+- **Alignment design:**
+  - The reference is the most common edge sequence.
+  - Matching in `"matchByTiming"` refuses ambiguous offsets: a periodic train truncated differently is excluded rather than guessed.
+  - The scope trigger time is used only as a sanity check (warning if the offset exceeds half an edge spacing), never for alignment.
+  - Known limitation: identically truncated strictly periodic trains cannot be told apart by any edge-based method.
+- **Contract additions:**
+  - §5: `ev.sampleInterval`, `ev.recordSpan`, and edge columns `startTime`, `endTime`, `smoothingSamples`.
+  - §6: `al.sourceIndex`, `al.edges`, `al.excluded`.
+  - §7: window columns `coreStartTime`, `coreEndTime`, `limited`; method `"fixed"`.
+- **Entry script:** steps 5–6 run with the same exclude-and-continue policy.
+  - Note: the script's `clear` wipes the caller's workspace, so it cannot be `run` from inside a function and keep that function's variables. This matters for the Batch 7 tests.
+- **Verified:**
+  - `tests/test_sync.m`: 26 cases pass. They cover real-data crops, a non-integer offset, noise, truncation, ambiguity, the midpoint flag, level mismatch, conditioning, synthetic DPT timing match, window margins, limiting, fallback, truncation, boundary edges, pulse-count warning, and minimum spacing.
+  - `test_settings` and `test_import` (38) still pass.
 
 ### 2026-10-13 — Batch 3: import & validation implemented
 
