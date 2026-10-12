@@ -104,13 +104,9 @@ check(abs(al0.offset(2) - al0.offset(1) - shiftB) < 1e-15 && max(abs(al0.residua
     'noise-free offset exact, zero residual');
 
 alC = alignCollections([evA, evB, evC], S);
-check(isequal(alC.collections, ["A", "B"]) && alC.excluded(1).name == "C", ...
-    'truncated collection excluded (sequence mismatch)');
-St = dptSettings(struct('alignment', struct('onSequenceMismatch', "matchByTiming"), ...
-    'report', struct('echoWarnings', false)));
-alT = alignCollections([evA, evC], St);
-check(numel(alT.collections) == 1 && contains(alT.excluded(1).reason, "ambiguous"), ...
-    'periodic train truncated: timing match refused as ambiguous');
+check(isequal(alC.collections, ["A", "B"]) && alC.excluded(1).name == "C" && ...
+    contains(alC.excluded(1).reason, "record length"), 'shorter record excluded (horizontal setup differs)');
+check(isequal(alC.sourceIndex, [1 2]) && alC.reference == 1, 'sourceIndex and reference');
 
 % Detection settings on real data
 Sm = dptSettings(struct('detection', struct('reference', struct('strategy', "midpoint"), ...
@@ -133,17 +129,25 @@ expectError('dpt:import:missingActiveGate', @() importCollection(fullfile(bucket
 
 %% Synthetic DPT gates ---------------------------------------------------
 dt = 1e-9;
-    function writeSynthetic(folder, tSpan, ons, offs, tau)
+    function writeSynthetic(folder, tSpan, ons, offs, tau, opts)
+        % OPTS (optional): low [V] (default -5), shift [s] trigger shift
+        % applied to the time labels (default 0), dt [s] (default dt).
+        if nargin < 6, opts = struct(); end
+        lo = -5; sh = 0; dtS = dt;
+        if isfield(opts, 'low'), lo = opts.low; end
+        if isfield(opts, 'shift'), sh = opts.shift; end
+        if isfield(opts, 'dt'), dtS = opts.dt; end
         mkdir(folder);
         fid = fopen(fullfile(folder, 'channelMap.m'), 'w');
         fprintf(fid, 'function map = channelMap()\nmap.channels.CH1 = "Vgs-LS";\nend\n'); fclose(fid);
-        v.time = (tSpan(1):dt:tSpan(2))';
-        g = zeros(size(v.time));
+        tp = (tSpan(1):dtS:tSpan(2))';                   % physical time
+        g = zeros(size(tp));
         for p = 1:numel(ons)
-            g = g + 0.5 * (1 + tanh((v.time - ons(p)) / tau)) .* 0.5 .* (1 - tanh((v.time - offs(p)) / tau));
+            g = g + 0.5 * (1 + tanh((tp - ons(p)) / tau)) .* 0.5 .* (1 - tanh((tp - offs(p)) / tau));
         end
-        v.data = -5 + 23 * g;
-        v.sampleInterval = dt; v.verticalUnits = 'V'; v.horizontalUnits = 's';
+        v.time = tp + sh;
+        v.data = lo + (18 - lo) * g;
+        v.sampleInterval = dtS; v.verticalUnits = 'V'; v.horizontalUnits = 's';
         v.waveformSource = 'CH1'; v.recordLength = numel(v.time);
         save(fullfile(folder, 'CH1.mat'), '-struct', 'v');
     end
@@ -151,12 +155,35 @@ dt = 1e-9;
 % Classic DPT: long first pulse, short second pulse.
 ons = [0, 8e-6]; offs = [5e-6, 9.5e-6]; tau = 50e-9;
 writeSynthetic(fullfile(root, 'R'), [-2e-6 12e-6], ons, offs, tau);
-writeSynthetic(fullfile(root, 'T'), [6e-6 12e-6], ons, offs, tau);     % misses pulse 1
 evR = detectGateTransitions(importCollection(fullfile(root, 'R'), cfg, S), cfg, S);
-evT = detectGateTransitions(importCollection(fullfile(root, 'T'), cfg, S), cfg, S);
-alS = alignCollections([evR, evT], St);
-check(isequaln(alS.match(:, 2)', [NaN NaN 1 2]) && abs(alS.offset(2) - alS.offset(1)) < 1e-12, ...
-    'DPT with distinct widths: truncated collection matched by timing');
+    function ev = synth(name, varargin)
+        writeSynthetic(fullfile(root, name), [-2e-6 12e-6], varargin{:});
+        ev = detectGateTransitions(importCollection(fullfile(root, name), cfg, S), cfg, S);
+    end
+evX = synth('X', [ons 11e-6], [offs 11.5e-6], tau);                    % extra pulse, same setup
+evY = synth('Y', ons, offs, tau, struct('shift', 123.4e-9));           % trigger varied
+evL = synth('L', ons, offs, tau, struct('low', -4.1));                 % gate levels differ
+evQ = synth('Q', ons, offs, tau, struct('shift', 2e-6));               % implausible trigger shift
+evZ = synth('Z', ons, offs, tau, struct('dt', 2e-9));                  % different horizontal scale
+
+alX = alignCollections([evR, evX, evY], S);
+check(isequal(alX.collections, ["R", "Y"]) && contains(alX.excluded(1).reason, "edge sequence"), ...
+    'extra pulse with identical setup: excluded (edge sequence)');
+check(abs(alX.offset(2) - alX.offset(1) - 123.4e-9) < 1e-12 && max(abs(alX.residual(:))) < 1e-12, ...
+    'trigger variation absorbed by one constant offset');
+alX2 = alignCollections([evX, evR, evY], S);
+check(alX2.collections(alX2.reference) == "R" && alX2.excluded(1).name == "X", ...
+    'majority sequence chosen as reference regardless of order');
+Sl = dptSettings(struct('gate', struct('levels', struct('tolerance', 0.5)), 'report', struct('echoWarnings', false)));
+alL = alignCollections([evR, evL], Sl);
+check(numel(alL.collections) == 2 && hasIssue(alL.issues, "dpt:alignment:gateLevelsDiffer"), ...
+    'gate levels differing between collections: warned, kept');
+alQ = alignCollections([evR, evQ], S);
+check(numel(alQ.collections) == 2 && hasIssue(alQ.issues, "dpt:alignment:largeOffset"), ...
+    'implausible trigger shift: warned');
+alZ = alignCollections([evR, evZ], S);
+check(isscalar(alZ.collections) && contains(alZ.excluded(1).reason, "sample interval"), ...
+    'different sample interval: excluded');
 
 % Windows: default adaptive, limiting, fallback and coverage.
 D = 2 * tau * atanh(0.7);                              % 15 %-85 % duration
@@ -168,8 +195,8 @@ Dc = w.coreEndTime(1) - w.coreStartTime(1);
 check(abs((w.coreStartTime(1) - w.startTime(1)) - Dc) < 1e-15 && ...
     abs((w.endTime(1) - w.coreEndTime(1)) - 2 * Dc) < 1e-15, 'adaptive margins pre = 1 D, post = 2 D');
 
-Sl = dptSettings(struct('windows', struct('adaptive', struct('post', 50)), 'report', struct('echoWarnings', false)));
-tlL = buildPulseTimeline(evR, alignCollections(evR, Sl), cfg, Sl);
+Sp = dptSettings(struct('windows', struct('adaptive', struct('post', 50)), 'report', struct('echoWarnings', false)));
+tlL = buildPulseTimeline(evR, alignCollections(evR, Sp), cfg, Sp);
 mid23 = mean(tlL.edges.time(3:4));
 check(tlL.windows.limited(3) && abs(tlL.windows.endTime(3) - mid23) < 1e-12, 'window limited to neighbour midpoint');
 

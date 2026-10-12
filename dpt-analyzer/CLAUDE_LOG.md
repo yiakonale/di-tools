@@ -22,7 +22,7 @@ Batch 2 (details in [DATA_CONTRACTS.md §8](DATA_CONTRACTS.md)):
 Batch 4 review points:
 
 - **Provisional window margins:** `S.windows.adaptive.pre = 1`, `post = 2` (multiples of the gate-edge duration D). Revisit in Batch 5 when the measurement thresholds are known. IGBT tail current may need a larger `post`.
-- **Sequence-mismatch default** is `"exclude"`. `"matchByTiming"` is available but refuses ambiguous periodic trains.
+- ~~Sequence-mismatch default~~ → resolved: see the acquisition model (2026-10-13).
 
 ## File map
 
@@ -44,6 +44,26 @@ Batch 4 review points:
 | `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-13 — Acquisition model fixed; alignment simplified
+
+- **User decision:** all collections in a bucket share the exact same setup.
+  - Horizontal scale and record length are constant.
+  - The active-switch Vgs is always captured, and all transitions fit in the capture window.
+  - Only the measured channels differ between collections, and the trigger point varies naturally.
+  - The two Vgs waveforms are treated as identical; one file is the best case, stitching via Vgs the worst case.
+  - Tests are mostly multi-pulse trains.
+- **Consequences (settings 0.5.0):**
+  - **Removed `"matchByTiming"`** and `S.alignment.onSequenceMismatch`. Truncation can't happen under this model, and for periodic trains the match was always ambiguous anyway. A sequence mismatch now always excludes the collection, as a missing or extra pulse or a different test.
+  - **Removed `S.alignment.onSampleIntervalMismatch`.** A dt or record-length mismatch across collections is a setup error and always excludes. Record length was not checked before; it is now (`ev.recordLength`).
+  - The model is listed among the settings' fixed rules (header of `dptSettings.m`).
+- **New checks of the "identical gate" assumption:**
+  - gate levels vs the reference (warning beyond `S.gate.levels.tolerance`);
+  - edge-duration agreement (info);
+  - per-edge residuals;
+  - trigger plausibility (warning if an offset exceeds half an edge spacing).
+- **Stitching vs the same-collection rule:** the universal timeline puts every collection's signals on one axis with shared pulse labels. Any measurement that needs simultaneously sampled signals still uses one collection. No change to that rule.
+- **Verified:** `test_sync` now has 31 cases, all passing; the timing-match cases were replaced by exclusion, majority-reference, trigger-shift, level-difference, implausible-offset and dt-mismatch cases. The example pipeline is unchanged.
 
 ### 2026-10-13 — Batch 4: detection, alignment, timeline implemented
 

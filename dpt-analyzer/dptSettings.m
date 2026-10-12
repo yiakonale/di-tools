@@ -36,6 +36,11 @@ function S = dptSettings(overrides)
 %     - A measurement requiring simultaneous signals uses one collection.
 %     - Expected pulse count is advisory; detected pulses drive analysis.
 %     - Waveforms are never resampled or interpolated for alignment.
+%     - All collections of a bucket share one scope setup (sample
+%       interval, record length) and capture the same complete pulse
+%       train of the active gate; only the trigger point varies. Each
+%       collection is aligned by one constant offset, and a collection
+%       whose setup or gate edge sequence differs is excluded.
 
 S = defaultSettings();
 
@@ -54,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.4.0";
+S.schemaVersion = "0.5.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -209,34 +214,18 @@ S.alignment.timeOrigin = "firstTurnOn";
 %   "firstEdge": offset of the first matched edge only.
 S.alignment.offsetEstimator = "median";
 
-% Behaviour when a collection's edge sequence (count and order of
-% turn-on/turn-off edges) differs from the reference collection's. The
-% reference is a collection with the most common sequence.
-%   "exclude"      : exclude the collection and report it.
-%   "matchByTiming": match edges by their relative timing (each edge to
-%                    the same-kind edge within half the smallest edge
-%                    spacing). An ambiguous match, e.g. a strictly
-%                    periodic train truncated differently, still
-%                    excludes the collection: it is never guessed.
-S.alignment.onSequenceMismatch = "exclude";
-
 % Maximum allowed per-edge residual after alignment. Residuals are
 % always reported. [] = report only, no pass/fail; the right limit
 % depends on the timing precision the measurements need, which is not
 % yet specified.
 S.alignment.maxResidual = [];              % [s]
 
-% Collections with different sample intervals can still be aligned
-% (alignment is a time offset, not a resampling), and measurements are
-% computed within one collection, so a mismatch is a warning by default.
-%   "exclude": exclude the collection.  "warn": report and keep it.
-S.alignment.onSampleIntervalMismatch = "warn";
-
 %% Sampling validation ------------------------------------------------
 % Numerical tolerances only; they absorb floating-point representation
 % error, not physical timing differences.
 
-% Relative tolerance when comparing sample intervals between channels.
+% Relative tolerance when comparing sample intervals between channels
+% and between collections.
 S.sampling.sampleIntervalRelTol = 1e-9;
 
 % Relative tolerance on diff(time) versus sampleInterval when checking
@@ -441,11 +430,7 @@ mustBeOption(S.pulses.incompleteEdgePolicy, ["discard", "error"], ...
 mustBeOption(S.alignment.timeOrigin, "firstTurnOn", 'alignment.timeOrigin');
 mustBeOption(S.alignment.offsetEstimator, ["median", "mean", "firstEdge"], ...
     'alignment.offsetEstimator');
-mustBeOption(S.alignment.onSequenceMismatch, ["exclude", "matchByTiming"], ...
-    'alignment.onSequenceMismatch');
 mustBeEmptyOrPositiveScalar(S.alignment.maxResidual, 'alignment.maxResidual');
-mustBeOption(S.alignment.onSampleIntervalMismatch, ["exclude", "warn"], ...
-    'alignment.onSampleIntervalMismatch');
 
 % Sampling
 mustBePositiveScalar(S.sampling.sampleIntervalRelTol, 'sampling.sampleIntervalRelTol');

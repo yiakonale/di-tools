@@ -216,7 +216,7 @@ One `ev` per collection, in that collection's **corrected time** of the gate cha
 
 ## 6. Alignment — `al = alignCollections(evs, S)`
 
-Input: `evs`, a 1×C array of gate-event structs. Collections that cannot be aligned are **excluded** and listed in `excluded`. Every per-collection field covers only the C' aligned collections, in input order.
+Input: `evs`, a 1×C array of gate-event structs (`ev.recordLength` is also carried for this check). Collections that cannot be aligned are **excluded** and listed in `excluded`. Every per-collection field covers only the C' aligned collections, in input order.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -231,13 +231,26 @@ Input: `evs`, a 1×C array of gate-event structs. Collections that cannot be ali
 | `excluded` | struct array | `name`, `reason`. |
 | `issues` | struct array | §0.1 |
 
+**Acquisition model** (user decision, 2026-10-13):
+
+- All collections of a bucket use the **same scope setup**: identical sample interval and record length.
+- They capture the **same complete pulse train** of the active gate; every transition fits inside the capture window.
+- Only the channels other than the active gate differ between collections, and the **trigger point varies** slightly between acquisitions.
+
+The active-gate waveforms are therefore treated as identical. Each collection is aligned by **one constant offset**, which absorbs the trigger variation.
+
 **Algorithm:**
 
-1. **Reference collection.** Each collection's edge sequence is its order of turn-on and turn-off edges. The reference is a collection with the most common sequence; ties go to the one with more edges, then to input order. Its edges define the universal edge list.
-2. **Matching.** Collections with the reference's sequence are matched edge by edge. For the others, `S.alignment.onSequenceMismatch` decides:
-   - `"exclude"` (default): exclude the collection.
-   - `"matchByTiming"`: every same-kind edge pair proposes an offset. Each offset is scored by how many reference edges then have a counterpart within half the smallest reference edge spacing. The best score must come from exactly **one** distinct offset; otherwise the match is ambiguous and the collection is excluded. A strictly periodic train truncated differently is the typical ambiguous case.
-3. **Offset estimation.** The offset is estimated from the per-edge differences with `S.alignment.offsetEstimator`. The scope trigger time serves only as a sanity check: a warning is raised if the edge-based offset exceeds half the edge spacing.
+1. **Reference collection.** Each collection's edge sequence is its order of turn-on and turn-off edges. The reference is a collection with the most common sequence; input order breaks ties. So a single deviating collection is always the one excluded.
+2. **Exclusion.** A collection is excluded if its sample interval, record length or edge sequence differs from the reference. Under this model, any such difference is a setup or data problem: a missing or extra pulse, or a different test. There is no timing-based re-matching, so a wrong match is impossible.
+3. **Offset.** The offset is estimated from the per-edge differences with `S.alignment.offsetEstimator` (default median). Edge j matches edge j.
+4. **Checking the "identical gate" assumption:**
+   - per-edge residuals (`al.residual`; a pass/fail limit is optional via `S.alignment.maxResidual`);
+   - edge-duration agreement with the reference (info);
+   - measured gate levels: a warning if they differ from the reference's by more than `S.gate.levels.tolerance`;
+   - trigger plausibility: a warning if an offset exceeds half the smallest edge spacing.
+
+`al.match` is kept in the contract (always edge j ↔ row j) so that consumers do not depend on this matching rule.
 
 ## 7. Timeline — `tl = buildPulseTimeline(evs, al, cfg, S)`
 

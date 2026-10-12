@@ -247,6 +247,7 @@ end
 ev.collection = col.name;
 ev.signal = gateSignal;
 ev.sampleInterval = dt;
+ev.recordLength = N;
 ev.recordSpan = [t(1), t(end)];                     % corrected gate time [s]
 ev.levels = struct('low', low, 'high', high, 'nominalLow', nominalLow, ...
     'nominalHigh', nominalHigh, 'source', S.gate.levels.source);
