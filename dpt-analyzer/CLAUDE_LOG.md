@@ -41,7 +41,7 @@ _Last session ended 2026-10-13. Every step is committed locally._
 - Commit locally after every step. Stage only `dpt-analyzer/` paths: the parent `di/` repo has unrelated modified `.mlx` files.
 - The user pushes to the remote themselves.
 - Batches go out for review and pause for feedback.
-- MATLAB R2024b is at `C:\Program Files\MATLAB\R2024bin\matlab` (`-batch` works). The Signal Processing Toolbox is **not** installed.
+- MATLAB R2024b is at `C:\Program Files\MATLAB\R2024b\bin\matlab` (`-batch` works). The Signal Processing Toolbox is **not** installed.
 
 ## File map
 
