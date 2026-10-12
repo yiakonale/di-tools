@@ -8,7 +8,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | Batch | Scope | Status |
 |---|---|---|
 | 1 | `dptSettings.m` | Approved (2026-10-12) |
-| 2 | Data contracts (`importChannel`, `importCollection`, timeline) | **In progress** |
+| 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | **In review** |
 | 3 | Import & validation implementation | Not started |
 | 4 | Gate detection & synchronization | Not started |
 | 5 | Measurement specification & registry | Not started (waiting on user's spec) |
@@ -17,9 +17,28 @@ Newest entries go at the top of each section. Every completed step is committed 
 
 ## Open questions (waiting on user)
 
-_None outstanding for Batch 1._
+Batch 2 (details in [DATA_CONTRACTS.md §8](DATA_CONTRACTS.md)):
+
+- **Q1:** Are deskew and current-probe polarity corrected in the scope? If not, the channel map gains `deskew` and `invert` fields.
+- **Q2:** Invalid collection: abort the bucket, or exclude it and continue? (Recommended: exclude and continue.)
+- **Q3:** What is the channel-to-signal mapping in `testdata/`, and which device is active?
 
 ## Decision record
+
+### 2026-10-12 — Batch 2: data contracts proposed
+
+- **Separate time references:**
+  - scope time `t_s` (as exported);
+  - universal time `t_u = t_s − offset(c)`, with `t_u = 0` at the reference collection's first turn-on.
+
+  Shifted time vectors are never stored.
+- **One time vector per collection.** This enforces the shared-acquisition invariant and avoids storing an extra 10 MB copy per channel.
+- **Channels are a struct array keyed by `.signal`,** because canonical names contain `-`, which is invalid in a field name.
+- **The channel map accepts a short and a long form.** Files resolve to an explicit `file` or else `<key>.mat`. `waveformSource` must match the key. Unknown fields are rejected.
+- **The active gate's presence is checked at import,** so a missing gate fails before any processing.
+- **Pipeline order:** detect → align → build timeline. Alignment comes before the timeline because the universal timeline needs the offsets.
+- **Windows are stored per (edge, collection)** because record coverage differs between collections. Measurements on collection c read only c's windows.
+- **Errors vs issues:** an invalid unit of work throws a `dpt:<stage>:<name>` error. Usable-but-noteworthy conditions become issue records with id, severity, stage, collection and message.
 
 ### 2026-10-12 — Batch 1 review outcome
 
