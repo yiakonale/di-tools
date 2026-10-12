@@ -8,8 +8,8 @@ Newest entries go at the top of each section. Every completed step is committed 
 | Batch | Scope | Status |
 |---|---|---|
 | 1 | `dptSettings.m` | Approved (2026-10-12) |
-| 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | **In review** |
-| 3 | Import & validation implementation | Not started |
+| 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
+| 3 | Import & validation implementation | **In review** |
 | 4 | Gate detection & synchronization | Not started |
 | 5 | Measurement specification & registry | Not started (waiting on user's spec) |
 | 6 | Capability-driven analysis | Not started |
@@ -19,10 +19,42 @@ Newest entries go at the top of each section. Every completed step is committed 
 
 Batch 2 (details in [DATA_CONTRACTS.md §8](DATA_CONTRACTS.md)):
 
-- **Q1a:** non-integer deskew policy. Options: `"round"` (proposed default) or `"error"`.
-- **Confirm:** CH7 (inductor current) maps to `Iout`.
+_None outstanding. Batch 3 awaits review._
+
+## File map
+
+| File | Responsibility |
+|---|---|
+| `dpt_analyzer.m` | Entry script: bucket configuration, path setup, orchestration. Renamed from `main.m`. |
+| `dptSettings.m` | Analyzer-wide settings: defaults, overrides, validation. |
+| `validateBucketConfig.m` | Validates and normalizes `cfg`; resolves a relative bucket path against the script folder. |
+| `discoverCollections.m` | Finds the collection folders in a bucket (folders with a `channelMap.m`). |
+| `validateChannelMap.m` | Validates a channel map and normalizes it to long form. |
+| `importChannel.m` | Loads one `.mat` file (flat or struct layout) and validates it. |
+| `importCollection.m` | Loads a collection: map, files, shared-timebase checks, corrections. |
+| `getSignal.m` | The single accessor for reading samples; applies deskew and inversion. |
+| `dptIssue.m` | Issue record constructor and echo. |
+| `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-13 — Batch 3: import & validation implemented
+
+- **Test data moved:** `testdata/` → `data/example/collection_A/` with `git mv` (a rename only). `main.m` was renamed to `dpt_analyzer.m` with `git mv`.
+- **Settings 0.3.0:** added `S.corrections.nonIntegerDeskew = "round"` (Q1a) and `S.corrections.integerShiftTol = 1e-6` samples (floating-point tolerance only).
+- **Two root files were added beyond the original plan:**
+  - `validateBucketConfig.m`, so the entry script contains no validation logic and the check can be tested on its own;
+  - `dptIssue.m`, so every stage uses one issue schema.
+- **Error ids:** a `dpt:` prefix means a problem in the data. The entry script excludes a collection only for `dpt:` errors; any other error is a code bug and is rethrown, so bugs are never mistaken for bad data. `importCollection` prefixes every error with `Collection "<name>":`.
+- **Loading channel maps:** each collection's `channelMap.m` is called with that folder temporarily made current (restored even on error). The cached function is cleared, and `which` confirms the right file. Tested with two collections loaded back to back: no stale definitions. The script never uses `genpath`.
+- **Contract change:** `getSignal` now takes a fourth argument, `S`. It supplies the boundary tolerance and keeps configuration flow explicit.
+- **Verified:**
+  - The example bucket imports correctly, also when the script is run from a different working folder: 6 channels, 160 ps, 1.25 M samples. CH5 and CH8 are reported as unmapped info.
+  - `tests/test_import.m`: 38 synthetic cases pass. They cover every error path, both file layouts, deskew rounding and the error policy, the shared grid in `getSignal`, inversion, untouched raw data, and discovery/config validation.
+  - `tests/test_settings.m`: the settings validation cases pass.
+  - Both are informal function scripts for now; they become `matlab.unittest` tests in Batch 7.
+- **Runtime:** a full `-batch` run on the example takes about 21 s including MATLAB start-up. Import alone has not been timed.
 
 ### 2026-10-13 — Batch 2 review round 1
 

@@ -54,7 +54,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.2.0";
+S.schemaVersion = "0.3.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -222,6 +222,21 @@ S.sampling.sampleIntervalRelTol = 1e-9;
 % Relative tolerance on diff(time) versus sampleInterval when checking
 % that a time vector is uniform (test record: 1e-10).
 S.sampling.timeVectorRelTol = 1e-6;
+
+%% Post-acquisition corrections ---------------------------------------
+% Optional per-channel deskew and inversion declared in channelMap.m,
+% applied on read by getSignal.m. Raw samples are never rewritten.
+
+% A deskew that is not an integer multiple of the sample interval.
+%   "round": apply round(deskew/dt)*dt everywhere and report the residual
+%            (<= dt/2). Signals then share one time grid, so sample-wise
+%            products such as V*I need no interpolation.
+%   "error": reject the collection.
+S.corrections.nonIntegerDeskew = "round";
+
+% Floating-point tolerance [samples] for deciding that deskew/dt is
+% already an integer (e.g. 1.28 ns / 160 ps = 8 +/- 1e-15).
+S.corrections.integerShiftTol = 1e-6;
 
 %% Measurement windows ------------------------------------------------
 % Windows are anchored to detected gate edges. The construction
@@ -397,6 +412,14 @@ mustBeOption(S.alignment.onSampleIntervalMismatch, ["error", "warn"], ...
 % Sampling
 mustBePositiveScalar(S.sampling.sampleIntervalRelTol, 'sampling.sampleIntervalRelTol');
 mustBePositiveScalar(S.sampling.timeVectorRelTol, 'sampling.timeVectorRelTol');
+
+% Corrections
+mustBeOption(S.corrections.nonIntegerDeskew, ["round", "error"], ...
+    'corrections.nonIntegerDeskew');
+mustBePositiveScalar(S.corrections.integerShiftTol, 'corrections.integerShiftTol');
+if S.corrections.integerShiftTol >= 0.5
+    fail('corrections.integerShiftTol', 'must be well below 0.5 samples.');
+end
 
 % Windows
 mustBeOption(S.windows.method, "adaptive", 'windows.method');

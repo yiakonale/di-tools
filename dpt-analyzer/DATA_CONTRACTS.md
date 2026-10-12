@@ -1,6 +1,6 @@
 # DPT Analyzer — Data Contracts
 
-Status: **proposal, under review (Batch 2)**. Once approved, this document is the reference that Batches 3–6 implement against. A change here must be agreed before the code changes.
+Status: **approved 2026-10-13. Sections 0–4 are implemented (Batch 3).** This document is the reference that Batches 3–6 implement against. A change here must be agreed before the code changes.
 
 ## 0. Conventions
 
@@ -25,11 +25,11 @@ Every stage output carries `.issues`, a 0×1 or K×1 struct array:
 |---|---|---|
 | `id` | string | e.g. `"dpt:import:unmappedFile"` |
 | `severity` | string | `"info"` or `"warning"` |
-| `stage` | string | `"import"`, `"detection"`, `"alignment"`, `"timeline"`, `"measurement"` |
+| `stage` | string | `"discovery"`, `"import"`, `"detection"`, `"alignment"`, `"timeline"`, `"measurement"` |
 | `collection` | string | collection name, or `""` if bucket-wide |
 | `message` | string | human-readable explanation |
 
-Whether an issue is also echoed through `warning()` is controlled by `S.report.echoWarnings`.
+Issues are created with `dptIssue(...)`; `dptIssue()` returns an empty 0×1 array for initialization. Warnings are echoed through `warning()` when `S.report.echoWarnings` is true. Info issues are printed when `S.report.verbosity` is `"verbose"`.
 
 ## 1. Bucket configuration — `cfg` (from `dpt_analyzer.m`)
 
@@ -41,7 +41,7 @@ Whether an issue is also echoed through `warning()` is controlled by `S.report.e
 | `cfg.gate.nominal.high` | double [V] | yes | Nominal on-state gate drive of the active device. |
 | `cfg.gate.nominal.low` | double [V] | yes | Nominal off-state gate drive. |
 
-Validation (Batch 3):
+Validated by `cfg = validateBucketConfig(cfg, S, scriptDir)`. Unknown or missing fields are errors.
 - `high > low`.
 - `S.gate.levels.tolerance < (high − low) / 2`.
 - The bucket folder exists.
@@ -81,6 +81,8 @@ end
 `.mat` files in the folder that the map does not reference are ignored and reported as `info` issues.
 
 `validateChannelMap` normalizes both forms to the full long form, with every optional field filled in: `signal`, `file`, `deskew`, `invert`.
+
+**Loading:** every collection defines a function with the same name, `channelMap`. `importCollection` therefore makes the collection folder current for the call, restores the previous folder afterwards (even on error), clears the cached function before and after, and verifies with `which` that the folder's own file is the one resolved. For the same reason the entry script never puts `data/` on the path (no `genpath`).
 
 ### 2.1 Post-acquisition corrections
 
@@ -150,11 +152,11 @@ The required variables are `data`, `time`, `sampleInterval` and `verticalUnits`.
 
 Signal lookup: `col.channels([col.channels.signal] == "Vds-LS")`. A struct array is used because the canonical names contain `-`, which is not valid in a field name.
 
-### 4.1 Signal access — `sig = getSignal(col, signal, tRange)`
+### 4.1 Signal access — `sig = getSignal(col, signal, tRange, S)`
 
 This is the **only** way downstream code reads waveform samples. All corrections are therefore applied in one place, identically for every measurement.
 
-- `tRange`: `[t0 t1]` in **corrected scope time**, or `[]` for the whole record.
+- `tRange`: `[t0 t1]` in **corrected scope time**, or `[]` for the whole record. Samples with `t0 ≤ t ≤ t1` are returned. The boundary tolerance is `S.sampling.timeVectorRelTol · dt`, which absorbs floating-point error.
 - Returns:
 
   | Field | Meaning |
@@ -163,6 +165,7 @@ This is the **only** way downstream code reads waveform samples. All corrections
   | `t` | Corrected times, `col.time(k) + deskewApplied`. |
   | `index` | Raw sample indices k. |
   | `complete` | `false` if `tRange` extends beyond this channel's corrected record. |
+  | `signal`, `channel`, `units` | Identification. |
   | `corrections` | The channel's corrections, for provenance. |
 
 - Because the effective deskew is a whole number of samples, two signals read over the same `tRange` land on the same corrected time grid. Their samples can be combined element by element (e.g. V·I) **without interpolation**.
@@ -272,12 +275,9 @@ Windows are per collection because record coverage differs between collections. 
 
 ## 8. Open decisions
 
-Open:
-
-- **Q1a — non-integer deskew policy** (§2.1). Proposed: `"round"` by default, with `"error"` as the alternative. If approved, the setting is added to `dptSettings.m` in Batch 3.
-
 Resolved:
 
+- **Q1a — non-integer deskew policy** (2026-10-13). `S.corrections.nonIntegerDeskew = "round"` by default, with `"error"` as the alternative. MATLAB's `round` rounds halves away from zero (−1.5 samples → −2).
 - **Q1 — probe corrections** (2026-10-13). Deskew and inversion are set in the scope by default. The channel map can apply optional additional corrections after acquisition (`deskew = 0`, `invert = false` by default). See §2.1 and §4.1.
 - **Q2 — invalid collection policy** (2026-10-13). A collection that fails import or detection is **excluded and reported**, and analysis continues with the rest. If no valid collection remains, the run aborts.
 - **Q3 — test-data mapping** (2026-10-13). The LS device is active.
@@ -290,9 +290,9 @@ Resolved:
   | CH4 | Vds-HS |
   | CH5, CH8 | Drain currents of the two **parallel** LS devices. Unmapped; no canonical name. |
   | MATH1 | Their sum: the true **Id-LS**. |
-  | CH7 | Inductor current → **Iout** (to be confirmed). |
+  | CH7 | Inductor current → **Iout** (confirmed). |
 
-  In Batch 3 the files move to `data/example/collection_A/` with `git mv`.
+  The files are now in `data/example/collection_A/` (moved with `git mv`).
 
 Deferred, not blocking:
 
