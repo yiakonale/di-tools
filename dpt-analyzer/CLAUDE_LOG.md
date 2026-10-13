@@ -10,8 +10,8 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 1 | `dptSettings.m` | Approved (2026-10-12) |
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
-| 4 | Gate detection & synchronization | **In review** |
-| 5 | Measurement specification & registry | Not started (waiting on user's spec) |
+| 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
+| 5 | Measurement specification & registry | **5a design in review**: [MEASUREMENT_DESIGN.md](MEASUREMENT_DESIGN.md) |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -27,10 +27,10 @@ _Last session ended 2026-10-13. Every step is committed locally._
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
 - Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync` (38 + 31 cases, plus the settings checks).
 
-**Next step: Batch 5.**
-- Waiting on the user's measurement specification: the quantities, their threshold definitions, required signals, and output fields.
-- Then design `measurements/measurementRegistry.m` and the measurement functions.
-- Do not implement any measurements before the specification arrives.
+**Next step: Batch 5b (shared primitives).**
+- Start only after the user approves [MEASUREMENT_DESIGN.md](MEASUREMENT_DESIGN.md) and answers its Q1–Q9.
+- The user's specification is stored verbatim in [MEASUREMENT_SPEC.md](MEASUREMENT_SPEC.md); row numbers #1–#55 refer to it.
+- Sub-batch order: 5b primitives, then 5c operating point and conduction, 5d timing and slew, 5e energy, 5f stress, 5g reverse recovery, 5h parasitics, then Batch 6.
 
 **Open points:**
 - **Window margins are provisional.** `S.windows.adaptive.pre = 1`, `post = 2` (multiples of the gate-edge duration D). Revisit them against the Batch 5 threshold definitions; IGBT tail current may need a larger `post`.
@@ -63,6 +63,28 @@ _Last session ended 2026-10-13. Every step is committed locally._
 | `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-13 — Batch 5a: measurement framework design proposed
+
+- **Received** the user's specification: 48 core and 7 optional measurements with selectable methods ([IEC-8]/[IEC-9]/[IEC-2]/[JEDEC]/[Conv]/[Custom]), built-in checks, and presets. Saved verbatim as `MEASUREMENT_SPEC.md`.
+- **Proposed design** (`MEASUREMENT_DESIGN.md`):
+  - Measurements are evaluated per event (turnOn, turnOff, pulse, break, pair, capture).
+  - Requirements are expressed by role (`drainVoltage@active`), as alternative signal sets satisfied within one collection.
+  - Methods are **declarative threshold definitions**, so `[Custom]` needs no code. They are served by about 8 implementation families.
+  - Percent levels come from measured operating-point results, not naive medians.
+  - Every result carries its method tag.
+- **Findings on the example record:**
+  - The first turn-on is at zero current (I_L = −6 A, probe offset), so turn-on events need an eligibility rule.
+  - The Id-LS off-state offset is −2 to −4 A, so the 0 % current level must be measured.
+  - A derived diode current I_L − I_D shows a +38 A conduction mismatch at 574 A (about 6.6 % probe gain mismatch). That exceeds the recovery current (about −20 A), so the derived source is opt-in only, guarded by a consistency check.
+  - V_F from Vds-HS is quantized in 2.8 V steps, so a resolution check is needed.
+  - The HS gate is not driven (non-synchronous, so #23 doesn't apply). HS gate crosstalk is +1.8 / −8.0 V (#37/38 measurable).
+- **Spec issues raised:**
+  - fixed 10–20 µs windows don't fit multi-pulse trains;
+  - a #47 ↔ #55 dependency cycle;
+  - #48 device and current unspecified;
+  - #4 extrapolation underspecified;
+  - Tek and R&S presets need the user's mapping (not guessed).
 
 ### 2026-10-13 — Acquisition model fixed; alignment simplified
 
