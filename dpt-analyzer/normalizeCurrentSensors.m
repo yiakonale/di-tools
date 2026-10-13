@@ -119,20 +119,24 @@ info.expectedRms = sqrt(median(sigmaRef)^2 + (k * median(sigmaOther))^2);
 info.pulseGains = cellfun(@(r, o) (mean(r) - b) / mean(o), ref, other);
 info.gainSpread = max(abs(info.pulseGains / k - 1));
 
+% Every failed check is reported, not just the first.
 N = S.measurements.normalization;
+failed = strings(1, 0);
 if k <= 0
-    info.reason = sprintf(['fitted gain %.4g is not positive: the two sensors have ' ...
+    failed(end+1) = sprintf(['fitted gain %.4g is not positive: the two sensors have ' ...
         'opposite polarity. Fix the probe orientation with "invert" in channelMap.m'], k);
-elseif info.residualRms > N.maxResidualRatio * info.expectedRms
-    info.reason = sprintf(['fit residual %.3g A rms exceeds %g x the expected %.3g A ' ...
-        'from sensor noise'], info.residualRms, N.maxResidualRatio, info.expectedRms);
-elseif info.gainSpread > N.maxGainSpread
-    info.reason = sprintf(['per-pulse gain varies by up to %.3g %% (limit %.3g %%): ' ...
-        'the sensors disagree non-linearly (saturation or droop), which one gain ' ...
-        'cannot correct'], 100 * info.gainSpread, 100 * N.maxGainSpread);
 else
-    info.reason = "";
+    if info.gainSpread > N.maxGainSpread
+        failed(end+1) = sprintf(['per-pulse gain varies by up to %.3g %% (limit %.3g %%): ' ...
+            'the sensors disagree non-linearly (saturation or droop), which one gain ' ...
+            'cannot correct'], 100 * info.gainSpread, 100 * N.maxGainSpread);
+    end
+    if info.residualRms > N.maxResidualRatio * info.expectedRms
+        failed(end+1) = sprintf(['fit residual %.3g A rms exceeds %g x the expected %.3g A ' ...
+            'from sensor noise'], info.residualRms, N.maxResidualRatio, info.expectedRms);
+    end
 end
+info.reason = strjoin(failed, "; ");
 
 summary = sprintf(['%s = %.5g x %s %+.4g A (reference %s): residual %.3g A rms ' ...
     '(expected %.3g), per-pulse gain spread %.3g %% over %d pulses'], refName, k, ...

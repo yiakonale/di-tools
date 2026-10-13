@@ -40,6 +40,10 @@ cfg.currentNormalization.reference = "Iout";   % "Iout" | "Id"
 % Example: settingsOverrides.report.verbosity = "verbose";
 settingsOverrides = struct();
 
+% Optional measurements (#48-55) run only when enabled here, by id or
+% "all". Ids: VdsOn, IdOn, RonEff, Vf, IfDiode, PcondDevice, PcondDiode.
+% settingsOverrides.measurements.enableOptional = ["VdsOn", "RonEff"];
+
 %% Paths ---------------------------------------------------------------
 % Only code folders go on the path. genpath is deliberately not used: it
 % would add every collection folder, each with its own channelMap.m.

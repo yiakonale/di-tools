@@ -379,3 +379,51 @@ Each has a recommendation, so a short "agree" is enough.
 | Q9 | **Agreed.** Composites (E_sw etc.) use results from the same collection only. |
 | Q10 | **Decided (2026-10-14).** Amplitude-band sliding maximum (`slopeBandMax`, §3.2) for #24–26. |
 | — | **Optional measurements** (#48–55) are enabled explicitly by the user. Until a UI exists, this is a labelled block in `dpt_analyzer.m` that sets `settingsOverrides.measurements.enableOptional`; a future UI would write the same field. |
+
+## 11. Implementation notes (5c, 2026-10-14)
+
+Refinements made while implementing the framework and the first groups. They supersede the corresponding sketches in §3–§5.
+
+### 11.1 Requirements are slots with alternatives
+
+`requires` is a list of **slots**, each naming one signal role with alternatives in preference order. For example:
+
+| Slot | Alternatives, in order |
+|---|---|
+| `V` | `drainVoltageClamped@active`, `drainVoltage@active` |
+| `I` | `outputCurrent`, `drainCurrent@nonActive` |
+| `gate` | `gateVoltage@active` |
+
+A method is available when every slot finds a signal **in the collection**. The signal actually used is recorded in `provenance.signals`. This replaces "alternative signal sets", which would have needed every combination listed.
+
+### 11.2 Selection
+
+`evaluateMeasurement` applies four rules in order:
+
+1. Optional measurements are skipped unless listed in `S.measurements.enableOptional`.
+2. Device-restricted measurements are skipped on the other device type.
+3. Methods are tried in the order of `S.measurements.methods.<key>`; the first available one is used.
+4. If none is available, the result is `skipped`, and the reason lists what each preferred method lacked.
+
+`"nominal"` methods are available only when listed **and** the `cfg.nominal` value is set. An unknown method name in the settings is an error.
+
+### 11.3 Tags
+
+IEC methods are tagged with the standard name. All others carry their class and a label, e.g. `[Conv: I_L at V_GS 10 %]`. A bare `[Conv]` cannot tell two conventional options of the same row apart.
+
+### 11.4 Gate instants
+
+`gateInstant` uses the same local zero-phase smoothing as the edge's own reference crossing (`smoothingSamples`) and the last crossing in the edge direction. On the synthetic tanh edges it is accurate to 0.001 ns.
+
+### 11.5 Physics notes recorded in the method descriptions
+
+- **V_DS-based bus voltage reads high by V_F** (#1 settledVds, #2 offStateVds). With the freewheel diode conducting, V_DS,active = V_DC + V_F, so these methods read about V_F high (3–8 V on the example). The bus channel does not, which is why it is preferred.
+- **Extrapolated I_on undershoots I_L** (#4). It reads below I_L at the gate instant by the ramp over the delay to the actual current rise: −0.9 A on the synthetic set, about 10 A/µs × 90 ns.
+- **Example record:** I_on(k+1) − I_off(k) goes from +1.96 A to −0.79 A over the train. The current keeps ramping during the turn-off delay, and the V_F loss during the break grows with current.
+
+### 11.6 Flags never change values
+
+- `belowNoiseFloor`: |value| < 3σ of its samples.
+- `resolutionLimited`: |value| < 10 ADC steps of its channel.
+
+A power inherits its voltage's resolution flag. **[data]** Every on-state voltage on the example's full-range channel is flagged: V_DS(on) is at most 1–2 V against a 2.8 V step.

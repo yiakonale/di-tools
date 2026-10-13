@@ -40,6 +40,10 @@ Issues are created with `dptIssue(...)`; `dptIssue()` returns an empty 0×1 arra
 | `cfg.expectedPulseCount` | positive integer or `[]` | yes | Advisory only. `[]` means no count check. |
 | `cfg.gate.nominal.high` | double [V] | yes | Nominal on-state gate drive of the active device. |
 | `cfg.gate.nominal.low` | double [V] | yes | Nominal off-state gate drive. |
+| `cfg.deviceType` | `"MOSFET"` \| `"IGBT"` | yes | Selects device-specific measurements and flags methods from the other device type's standard (5c). |
+| `cfg.nominal.busVoltage`, `.testCurrent` | double or `[]` | no (default `[]`) | Used only by `"nominal"` (Custom) operating-point methods. |
+| `cfg.currentNormalization.enable` | logical | no (default `false`) | Opt-in current-sensor normalization (MEASUREMENT_DESIGN.md §7.3). |
+| `cfg.currentNormalization.reference` | `"Iout"` \| `"Id"` | no (default `"Iout"`) | The sensor taken as truth. |
 
 Validated by `cfg = validateBucketConfig(cfg, S, scriptDir)`. Unknown or missing fields are errors.
 - `high > low`.
@@ -136,6 +140,7 @@ The required variables are `data`, `time`, `sampleInterval` and `verticalUnits`.
 | `recordLength` | double | Shared N. |
 | `channels` | 1×K struct | One element per mapped channel, in map order (fields below). |
 | `unmappedFiles` | string array | `.mat` files present but not mapped. |
+| `normalization` | struct | Outcome of `normalizeCurrentSensors` (pipeline step 6b): `applied`, `reference`, `adjusted`, `gain`, `offset`, `residualRms`, `expectedRms`, `pulseGains`, `gainSpread`, `nPulses`, `reason`. Default: not applied, reason "not run". |
 | `issues` | struct array | §0.1 |
 
 `channels(k)` holds the `importChannel` fields **except `time`**, plus:
@@ -149,6 +154,7 @@ The required variables are `data`, `time`, `sampleInterval` and `verticalUnits`.
 | `corrections.deskewApplied` | double [s] | Effective deskew after the non-integer policy (an integer multiple of dt). |
 | `corrections.shift` | double | `deskewApplied / dt`, in samples (an integer). |
 | `corrections.invert` | logical | As requested in the map. |
+| `corrections.gain`, `corrections.offset` | double | Current-sensor normalization of this channel (default 1 and 0). Set only by `normalizeCurrentSensors`. |
 
 Signal lookup: `col.channels([col.channels.signal] == "Vds-LS")`. A struct array is used because the canonical names contain `-`, which is not valid in a field name.
 
@@ -161,7 +167,7 @@ This is the **only** way downstream code reads waveform samples. All corrections
 
   | Field | Meaning |
   |---|---|
-  | `x` | Corrected samples (`invert` applied). |
+  | `x` | Corrected samples: `invert` applied, then `gain · x + offset` (normalization). |
   | `t` | Corrected times, `col.time(k) + deskewApplied`. |
   | `index` | Raw sample indices k. |
   | `complete` | `false` if `tRange` extends beyond this channel's corrected record. |
@@ -295,6 +301,7 @@ A pulse is the p-th turn-on together with the turn-off that follows it. A turn-o
 | `collection` | double | Index into `al.collections`. |
 | `startTime`, `endTime` | double [s] | Universal time. For collection c, the corrected-time range passed to `getSignal` is `[startTime endTime] + offset(c)`. Windows hold no sample indices, because with deskew the indices differ per channel. |
 | `coreStartTime`, `coreEndTime` | double [s] | Universal time of the collection's qualified gate edge (`startTime`/`endTime` from §5). This is the core where the switching happens. |
+| `territoryStartTime`, `territoryEndTime` | double [s] | Universal time of the edge's territory: midpoint to the previous edge → midpoint to the next edge, clipped to the collection's record. Always defined, independent of `S.windows.limitToNeighborMidpoint`. Used for settled levels, ringing decay, peaks and fixed-duration windows (5c). |
 | `method` | string | `"adaptive"` \| `"fixed"` \| `"fallback"` |
 | `limited` | logical | Clipped to the midpoint between neighbouring edges. |
 | `truncated` | logical | Clipped at the record boundary. |

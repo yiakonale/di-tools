@@ -11,7 +11,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | 5a approved; **5b primitives in review** (2026-10-14) |
+| 5 | Measurement specification & registry | 5a, 5b done; **5c in review** (2026-10-14); 5d–5h to go |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -25,9 +25,9 @@ _Last session ended 2026-10-13. Every step is committed locally._
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives` (38 + 31 + 33 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point` (38 + 31 + 33 + 39 cases, plus the settings checks).
 
-**Next step: Batch 5c** (current-sensor normalization, operating point #1–4, conduction #49–54), once 5b is reviewed.
+**Next step: Batch 5d** (timing #13–23, slew rates #24–28), once 5c is reviewed.
 - [MEASUREMENT_DESIGN.md](MEASUREMENT_DESIGN.md) is approved; its §10.1 records every decision.
 - The user's specification is stored verbatim in [MEASUREMENT_SPEC.md](MEASUREMENT_SPEC.md); row numbers #1–#55 refer to it.
 - Sub-batch order: 5b primitives, then 5c operating point and conduction, 5d timing and slew, 5e energy, 5f stress, 5g reverse recovery, 5h parasitics, then Batch 6.
@@ -59,11 +59,47 @@ _Last session ended 2026-10-13. Every step is committed locally._
 | `sync/detectGateTransitions.m` | Measures the gate levels, qualifies edges by hysteresis, times them on a local smoothed copy. |
 | `sync/alignCollections.m` | Chooses the reference collection, matches edges, estimates offsets and residuals, excludes collections that cannot be aligned. |
 | `sync/buildPulseTimeline.m` | Universal edges, pulses, and per-(edge, collection) windows. |
+| `normalizeCurrentSensors.m` | Opt-in I_D / I_L sensor calibration on the on-state segments (pipeline step 6b). |
+| `measurements/measurementRegistry.m` | Measurement and method definitions (slots, tags, implementations). Currently #1–4 and #49–54. |
+| `measurements/evaluateMeasurement.m` | Optional/device gating, method selection by preference and available signals, skip reasons. |
+| `measurements/eventContext.m`, `gateInstant.m`, `windowStats.m`, `resolveRole.m`, `makeResult.m`, `valueFlags.m`, `formatResult.m` | Framework helpers: event times in corrected time, V_GS p % instants, window statistics, role to signal, result skeleton, quality flags, tagged one-line output. |
+| `measurements/measureBusVoltage.m`, `measureSwitchingCurrent.m`, `measureConduction.m` | Implementations of #1–2, #3–4 and #49–54. |
+| `tests/makeSyntheticDPT.m` | Synthetic phase-leg generator with known truth, for measurement tests. |
 | `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`. |
 | `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
-| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`); formalized in Batch 7. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-14 — Batch 5c: normalization, operating point, conduction
+
+- **Part 1, foundations (settings 0.6.0):**
+  - `S.measurements` populated: shared parameters relative to D (Q6), noise-floor multiple 3, gate basis, normalization acceptance, `enableOptional`, method preference lists, parameters.
+  - Catalog: `Vdc`, `Vds-HS-clamp`, `Vds-LS-clamp`, and the documented sign conventions (Q1).
+  - Bucket config: `cfg.deviceType` is now **required**; `cfg.nominal.*` and `cfg.currentNormalization.*` are optional.
+  - `getSignal` applies the gain/offset corrections.
+  - The timeline's window table gains `territoryStartTime`/`territoryEndTime`. The territory is always the midpoint region; only window *limiting* depends on `limitToNeighborMidpoint`.
+- **Part 2, current-sensor normalization** (`normalizeCurrentSensors`, pipeline step 6b):
+  - An affine fit over the on-state segments, applied as a declared correction.
+  - Refused on a negative gain, a residual above 2× the noise-based expectation, or a per-pulse gain spread above 2 %. All failing reasons are listed.
+  - Example: k = 1.0691, b = −0.10 A, residual 1.98 vs 2.05 A expected, spread 0.26 %, so it is applied.
+  - Synthetic: a ×0.95 + 1.5 A sensor error is recovered exactly. Saturation, inversion, a single pulse and a missing Iout are all refused or reported.
+- **Part 3, framework and operating point:**
+  - Registry with **requirement slots** (alternatives in preference order).
+  - `evaluateMeasurement` handles selection and skip reasons. Tags are `IEC 60747-x` or `Conv: <label>`.
+  - Gate instants use the edge's local smoothing.
+  - #1–4 implemented: the bus channel is preferred; I_on/I_off come from I_L at V_GS 10 %/90 % (mean ±D/2), with extrapolated-I_D and nominal options.
+- **Part 4, conduction #49–54 (optional):**
+  - Two shared windows: on-state (final portion / delay-to-end / custom) and diode (from the settled turn-off to the next V_GS 10 %).
+  - The clamped V_DS channel is used automatically when mapped.
+  - Time-resolved R_on produces one result per delay.
+  - A power inherits its voltage's resolution flag.
+- **Findings:**
+  - V_DS-based V_DC reads high by V_F of the freewheel diode (3–8 V on the example); the bus channel is preferred for this reason.
+  - Extrapolated I_on undershoots by the ramp over the delay to the current rise (−0.9 A synthetic).
+  - Example: I_on(k+1) − I_off(k) goes from +1.96 A to −0.79 A over the train (turn-off delay ramp vs V_F loss in the break).
+  - Every example on-state voltage is flagged resolution-limited (2.8 V ADC step).
+- **Verified:** `tests/test_operating_point.m` passes 39 cases (synthetic truth, fallbacks, normalization accept/refuse, example sanity). All earlier suites still pass.
 
 ### 2026-10-14 — Batch 5b: shared primitives implemented
 
