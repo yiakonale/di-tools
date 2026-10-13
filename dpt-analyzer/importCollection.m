@@ -13,6 +13,7 @@ function col = importCollection(collectionPath, cfg, S)
 %                     corrections, file, layout, sampleInterval,
 %                     recordLength, source, zeroIndex, meta
 %     unmappedFiles   .mat files present but not in the map
+%     normalization   outcome of normalizeCurrentSensors (not run here)
 %     issues          issue records (dptIssue)
 %
 %   The collection is rejected (error) if the map is invalid, a mapped
@@ -172,6 +173,11 @@ col.sampleInterval = dt;
 col.recordLength = N;
 col.channels = [channels{:}];
 col.unmappedFiles = unmapped;
+% Outcome of the opt-in current-sensor normalization; filled in by
+% normalizeCurrentSensors after the timeline is built.
+col.normalization = struct('applied', false, 'reference', "", 'adjusted', "", ...
+    'gain', 1, 'offset', 0, 'residualRms', NaN, 'expectedRms', NaN, ...
+    'pulseGains', [], 'gainSpread', NaN, 'nPulses', 0, 'reason', "not run");
 col.issues = issues;
 
 end

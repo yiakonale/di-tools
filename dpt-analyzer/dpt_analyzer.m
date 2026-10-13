@@ -10,7 +10,7 @@
 %     4. Import and validate each collection
 %     5. Detect the active gate's transitions in each collection
 %     6. Align collections on matched edges; build the pulse timeline and
-%        measurement windows
+%        measurement windows; normalize current sensors (opt-in)
 %     7. Run eligible measurements                (Batches 5-6)
 %     8. Report results                           (Batch 6)
 %
@@ -26,6 +26,15 @@ cfg.deviceType         = "MOSFET";         % "MOSFET" | "IGBT"
 cfg.expectedPulseCount = 10;               % advisory only; [] = no check
 cfg.gate.nominal.high  = 18;               % [V] active gate on-state drive
 cfg.gate.nominal.low   = -5;               % [V] active gate off-state drive
+
+% Optional: nominal operating point, used only by "nominal" methods.
+% cfg.nominal.busVoltage  = 400;            % [V]
+% cfg.nominal.testCurrent = 500;            % [A]
+
+% Optional: calibrate the I_D and Iout sensors against each other on the
+% on-state of every pulse, taking one of them as the truth.
+cfg.currentNormalization.enable    = false;
+cfg.currentNormalization.reference = "Iout";   % "Iout" | "Id"
 
 %% Settings overrides (optional) ---------------------------------------
 % Example: settingsOverrides.report.verbosity = "verbose";
@@ -106,6 +115,12 @@ evs = evs(al.sourceIndex);
 tl = buildPulseTimeline(evs, al, cfg, S);
 issues = [issues; tl.issues];
 
+%% 6b. Current-sensor normalization (opt-in: cfg.currentNormalization) ---
+for k = 1:numel(collections)
+    [collections(k), iss] = normalizeCurrentSensors(collections(k), k, al, tl, cfg, S);
+    issues = [issues; iss]; %#ok<AGROW>
+end
+
 %% Summary --------------------------------------------------------------
 if S.report.verbosity ~= "quiet"
     fprintf('Bucket: %s  (active device: %s)\n', cfg.bucketPath, cfg.activeDevice);
@@ -118,6 +133,13 @@ if S.report.verbosity ~= "quiet"
         fprintf('  %-16s gate %s: levels %.3g / %.3g V, %d edges, offset %.6g us\n', '', ...
             evs(k).signal, evs(k).levels.low, evs(k).levels.high, ...
             height(evs(k).edges), al.offset(k) * 1e6);
+        nz = col.normalization;
+        if nz.applied
+            fprintf('  %-16s currents normalized to %s: %s x %.5g %+.3g A\n', '', ...
+                nz.reference, nz.adjusted, nz.gain, nz.offset);
+        elseif cfg.currentNormalization.enable
+            fprintf('  %-16s currents NOT normalized: %s\n', '', nz.reason);
+        end
     end
     for x = excluded
         fprintf('  %-16s EXCLUDED: %s\n', x.name, x.reason);
