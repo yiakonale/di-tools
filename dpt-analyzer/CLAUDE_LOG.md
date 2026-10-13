@@ -17,22 +17,40 @@ Newest entries go at the top of each section. Every completed step is committed 
 
 ## Resume here
 
-_Last session ended 2026-10-13. Every step is committed locally._
+_Last session ended 2026-10-14. Every step is committed locally._
 
 **State:**
-- Batches 1–3 are approved. Batch 4 (detection, alignment, timeline) is implemented and in review.
-- Running `dpt_analyzer.m` executes workflow steps 1–6 end to end on `data/example`: 10 pulses, 20 edges, 20/20 windows usable.
+- Batches 1–4 are done.
+- In Batch 5: 5a (design) and 5b (primitives) are done. 5c (normalization, operating point #1–4, conduction #49–54) is implemented and tested.
+- Running `dpt_analyzer.m` executes workflow steps 1–6b (import → detection → alignment → timeline → optional current normalization) on `data/example`.
+- Measurements are implemented and tested but **not yet run by the entry script**; that is Batch 6 (`runMeasurements`).
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
 - Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point` (38 + 31 + 33 + 39 cases, plus the settings checks).
 
-**Next step: Batch 5d** (timing #13–23, slew rates #24–28), once 5c is reviewed.
+**Next step (pick up here): implement the bus-voltage model V_DC(t)**, approved but not yet coded. See [MEASUREMENT_DESIGN.md §12](MEASUREMENT_DESIGN.md).
+1. **Config:** `cfg.circuit.Cdc` [F] and `cfg.circuit.CdcTolerance` (default 0.2). Settings: a V_DC source preference list (busChannel, kvl, chargeDroop, constant).
+2. **`busVoltageModel`, once per collection (pipeline step after 6b).** Produces V_DC(t) with its source:
+   - bus channel, or KVL (V_DS,HS + V_DS,LS on settled segments), or charge droop V_DC0 − Q(t)/C_dc, or constant V_DC0;
+   - V_DC0 = pre-pulse active V_DS, else `cfg.nominal.busVoltage`;
+   - the droop check flags `busDroopDetected`;
+   - C ± tolerance is propagated into a V_DC uncertainty;
+   - C is estimated as a cross-check where KVL or a bus channel exists.
+3. **Rewire #1/#2** to read V_DC(t), keeping the spec's settled/off-state V_DS options, labelled as including V_F. Add a model-based V_F method for #52 for when the non-active V_DS is absent.
+4. **UI:** the run summary states the V_DC source per collection; results carry it. Write the `dpt_analyzer.m` config block in plain words.
+5. **Tests:** synthetic set (makeSyntheticDPT already models droop via `vdcSlope`; add a charge-based droop option) and example checks: C ≈ 0.685 mF, droop 404 → 374 V.
+
+Then **Batch 5d** (timing #13–23, slew rates #24–28).
 - [MEASUREMENT_DESIGN.md](MEASUREMENT_DESIGN.md) is approved; its §10.1 records every decision.
 - The user's specification is stored verbatim in [MEASUREMENT_SPEC.md](MEASUREMENT_SPEC.md); row numbers #1–#55 refer to it.
 - Sub-batch order: 5b primitives, then 5c operating point and conduction, 5d timing and slew, 5e energy, 5f stress, 5g reverse recovery, 5h parasitics, then Batch 6.
 
 **Open points:**
+- **V_DS probe calibration (about 1 %).** Vds-HS reads −2.8 V before pulse 1 (true 0 V). A possible opt-in zero-offset correction from the pre-pulse segment (design §12.3).
+- **Future feature: V_DC calibration routine.** Run the same pulse train with a dedicated Vdc channel to measure droop versus charge exactly for a bucket (design §12.2).
+- **Normalization acceptance limits are provisional:** residual ≤ 2× expected, gain spread ≤ 2 %.
+- **Confirm `cfg.deviceType = "MOSFET"`** for the example record (assumed SiC from the −5/+18 V drive and 3–8 V body-diode drop).
 - **Window margins are provisional.** `S.windows.adaptive.pre = 1`, `post = 2` (multiples of the gate-edge duration D). Revisit them against the Batch 5 threshold definitions; IGBT tail current may need a larger `post`.
 - **`S.alignment.maxResidual` is unset.** Calibrate it once a real bucket with two or more collections exists: the residuals will show the real shot-to-shot gate jitter.
 - **Batch 7 note:** the `clear` in `dpt_analyzer.m` wipes the caller's workspace, so tests must not `run` it from inside a function and expect that function's variables to survive.
@@ -70,6 +88,20 @@ _Last session ended 2026-10-13. Every step is committed locally._
 | `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-14 — Drooping bus: V_DC(t) model approved (not yet implemented)
+
+- **User:** a dedicated bus-voltage channel is rarely captured (channel-limited scopes), and not all V_DS channels are usually captured either.
+- **[data] Example record:**
+  - before pulse 1, Vds-LS = 403.2 V (= V_DC exactly: no current, and the inductor shorts the HS device);
+  - the KVL sum V_DS,HS + V_DS,LS tracks V_DC through the train, from 404 V down to 374 V;
+  - the droop is linear in the charge drawn, ∫ I_D dt: C = 0.685 mF, residual 0.42 V rms;
+  - V_F = −V_DS,HS during the breaks is 5.0–7.3 V.
+- **Rejected:** "first V_DS, then attribute everything to V_F". Under droop, the break V_DS falls 22 V below V_DC0, which would mean an impossible V_F of −22 V. That impossibility becomes an automatic `busDroopDetected` check instead.
+- **Approved chain**, once per collection: bus channel → KVL sum → charge droop V_DC0 − Q/C_dc → constant V_DC0 (with the droop check). Design §12.
+- **C_dc** is always known with a tolerance (typically ±20 %, `cfg.circuit.CdcTolerance`), propagated as V_DC uncertainty. It is estimated from data as a cross-check where KVL or a bus channel exists.
+- **UI requirement:** the V_DC source must be obvious. It goes in the run summary per collection and in each result, and the config block is written in plain words.
+- **Future:** a V_DC calibration routine with a dedicated Vdc channel, and an optional zero-offset correction of the non-active V_DS.
 
 ### 2026-10-14 — Batch 5c: normalization, operating point, conduction
 

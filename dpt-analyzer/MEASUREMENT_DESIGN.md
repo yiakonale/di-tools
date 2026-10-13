@@ -427,3 +427,44 @@ IEC methods are tagged with the standard name. All others carry their class and 
 - `resolutionLimited`: |value| < 10 ADC steps of its channel.
 
 A power inherits its voltage's resolution flag. **[data]** Every on-state voltage on the example's full-range channel is flagged: V_DS(on) is at most 1–2 V against a 2.8 V step.
+
+## 12. Bus-voltage model V_DC(t) (approved 2026-10-14, NOT yet implemented)
+
+**Problem.** A separate bus-voltage channel is rarely captured because scopes are channel-limited, and a small DC link droops during the pulse train.
+
+**[data]** On the example record, V_DC falls from about 404 V to 374 V (−7.5 %) over the 10 pulses. The droop is linear in the charge drawn from the link, Q(t) = ∫ I_D,active dt:
+
+> ΔV = Q / C with C = 0.685 mF; residual 0.42 V rms over 9 breaks.
+
+**Why "first V_DS, the rest is diode drop" fails.** Before pulse 1 no current flows, and the inductor DC-shorts the non-active device, so the active V_DS equals V_DC exactly (403.2 V on the example). That part is right. During a break, though, V_DS = V_DC(t) + V_F with V_F > 0, so a break V_DS *below* V_DC0 proves droop. On the example, break 9 is 22 V below V_DC0, which would mean an impossible V_F of −22 V.
+
+### 12.1 Approved chain
+
+V_DC(t) is computed **once per collection**. Every measurement that needs V_DC uses it: #1, #2, the "x % of V_DC" thresholds of #5/#6, #8 E_io, #30 overshoot, and #45. The first available source is used:
+
+1. **Bus channel** (`Vdc`), if mapped.
+2. **KVL:** V_DS,HS + V_DS,LS, when both are in the collection. Evaluated on settled segments only; switching transients are excluded because loop L·di/dt adds to them.
+3. **Charge droop:** V_DC(t) = V_DC0 − Q(t)/C_dc.
+   - V_DC0 is the active V_DS before pulse 1, or `cfg.nominal.busVoltage` when no pre-pulse segment exists.
+   - Q(t) = ∫ I_D,active dt.
+   - C_dc comes from `cfg.circuit.Cdc`.
+4. **Constant V_DC0** (measured before pulse 1, or entered), with the **droop check**: if any break's off-state V_DS is below V_DC0 by more than its noise floor, results are flagged `busDroopDetected` and the observed droop is stated.
+
+The spec's per-event options ("settled off-state V_DS", "off-state V_DS before turn-on") stay selectable for #1/#2, labelled as including V_F. With only one V_DS channel, V_F = V_DS(break) − V_DC(t) becomes a model-based method for #52, flagged as such; −V_DS of the non-active device stays preferred when present.
+
+### 12.2 User decisions
+
+- **Fallback order** as above. Usually not all V_DS channels are captured, so source 3 or 4 will be common.
+- **C_dc is always known, with a tolerance**, typically ±20 % for DC-link capacitors. New fields: `cfg.circuit.Cdc` [F] and `cfg.circuit.CdcTolerance` (default 0.2).
+  - The droop uncertainty must be propagated and reported. On the example a 30 V droop ±20 % is ±6 V at the last pulse.
+  - Proposed: when KVL or a bus channel is available in any collection of the bucket, C is also estimated from data as a **cross-check** (warning if outside the tolerance). That is consistent with the identical-setup model.
+- **UI requirement.** Which V_DC source is used must be obvious to the user. At minimum:
+  - the run summary states the source per collection, e.g. "V_DC(t): charge droop, C = 0.68 mF ±20 %, V_DC0 = 403.2 V (pre-pulse V_DS)";
+  - every V_DC-dependent result carries the source in its tag or provenance.
+
+  The configuration block in `dpt_analyzer.m` should present the choice in plain words.
+- **Future option: calibration routine.** Run the same pulse train once with a dedicated V_DC channel, to measure the droop-versus-charge curve of the setup exactly. That replaces C_dc ± 20 % with a measured curve for that bucket. Not now.
+
+### 12.3 Related open point
+
+**The full-range V_DS probes disagree by about 1 %.** On the example, Vds-HS reads −2.8 V before pulse 1 where the true value is 0 V, and the three V_DC readings around pulse 1 (pre-pulse V_DS, on-state KVL, break KVL) differ by 3–4 V. Any V_DS-based V_DC is therefore absolute only to about 1 %, the same size as V_F. A possible later opt-in: zero-offset correction of the non-active V_DS from the pre-pulse segment, where it must read 0.
