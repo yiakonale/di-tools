@@ -11,7 +11,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | **5a design in review**: [MEASUREMENT_DESIGN.md](MEASUREMENT_DESIGN.md) |
+| 5 | Measurement specification & registry | 5a design approved (2026-10-14); **5b next** |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -28,7 +28,7 @@ _Last session ended 2026-10-13. Every step is committed locally._
 - Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync` (38 + 31 cases, plus the settings checks).
 
 **Next step: Batch 5b (shared primitives).**
-- Start only after the user approves [MEASUREMENT_DESIGN.md](MEASUREMENT_DESIGN.md) and answers its Q1–Q9.
+- [MEASUREMENT_DESIGN.md](MEASUREMENT_DESIGN.md) is approved; its §10.1 records every decision.
 - The user's specification is stored verbatim in [MEASUREMENT_SPEC.md](MEASUREMENT_SPEC.md); row numbers #1–#55 refer to it.
 - Sub-batch order: 5b primitives, then 5c operating point and conduction, 5d timing and slew, 5e energy, 5f stress, 5g reverse recovery, 5h parasitics, then Batch 6.
 
@@ -63,6 +63,29 @@ _Last session ended 2026-10-13. Every step is committed locally._
 | `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-14 — Batch 5a approved
+
+**User decisions:**
+- **Q1** sign conventions agreed.
+- **Q2** no per-event exclusion, with flag-not-clamp. A percent threshold is used only if min(p, 1 − p)·A ≥ 3σ of that signal, so pulse 1's voltage-based results are kept and its current-based ones are skipped with a reason. An optional display-only clamp, `S.report.clampNonNegative`.
+- **Q3** gate basis is the swing.
+- **Q4** IEC-8 and IEC-9 presets only; every [Conv]/[Custom] option stays individually selectable.
+- **Q5** derived diode current is opt-in, guarded.
+- **Q6** windows and settling are proportional to D.
+- **Q7** new signals `Vdc` and `Vds-*-clamp`.
+- **Q8:**
+  - I_on/I_off come from **I_L at the switching instant** (V_GS 10 % rising / 90 % falling), read as the mean over ±D/2. Same collection only, with fallback to the spec's I_D options.
+  - #48 Q_oss moves to optional (non-active-device method).
+- **Q9** composites use one collection only.
+- **Q10** an amplitude-band sliding maximum slew rate (`slopeBandMax`, default 20 % band).
+- **Optional measurements** are enabled by the user (a labelled block in `dpt_analyzer.m` for now).
+
+**New feature, user proposal: current-sensor normalization.**
+- Opt-in, with the user choosing the reference ("truth") sensor: `cfg.currentNormalization.enable` / `.reference`.
+- An affine fit I_ref = k·I_other + b over the on-state segments of all pulses, applied through `getSignal` as a declared correction.
+- Refused if the residual or the per-pulse ratio spread is too large.
+- **[data]** On the example: k = 1.0691, b = −0.10 A, residual 1.98 A rms (at quantization level), per-pulse ratio 1.065–1.071 over 32–572 A. A pure 6.9 % gain mismatch, which this corrects well.
 
 ### 2026-10-13 — Batch 5a: measurement framework design proposed
 

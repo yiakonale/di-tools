@@ -1,6 +1,6 @@
 # DPT Analyzer — Measurement Framework Design (Batch 5)
 
-Status: **proposal, under review.** It implements the user's specification in [MEASUREMENT_SPEC.md](MEASUREMENT_SPEC.md); row numbers (#1–#55) refer to that document. No measurement code is written until this design is approved. Findings from the example record are marked **[data]**.
+Status: **approved 2026-10-14** (all questions answered, §10.1). It implements the user's specification in [MEASUREMENT_SPEC.md](MEASUREMENT_SPEC.md); row numbers (#1–#55) refer to that document. No measurement code is written until this design is approved. Findings from the example record are marked **[data]**.
 
 ## 1. Plan
 
@@ -10,7 +10,7 @@ The specification is too large to implement in one step. Proposed order, each st
 |---|---|
 | **5a** | This design: registry schema, method model, presets, level model, shared primitives, result schema, configuration additions, open questions. |
 | **5b** | Shared primitives (§6), with tests on the example record and on synthetic edges. |
-| **5c** | Operating point (#1–4) and conduction (#49–54). Every other group depends on them. |
+| **5c** | Current-sensor normalization (§7.3), operating point (#1–4) and conduction (#49–54). Every other group depends on them. |
 | **5d** | Timing (#13–23) and slew rates (#24–28). |
 | **5e** | Switching energy and power (#5–12). |
 | **5f** | Voltage, current and gate stress (#29–38). |
@@ -82,7 +82,7 @@ Each event has two time regions:
 | `row` | Row number in the specification. |
 | `symbol`, `name`, `category`, `unit` | Display information. |
 | `event` | Event kind (§2.1). |
-| `optional` | `true` for #49–55 (off by default). |
+| `optional` | `true` for #48–55 (off by default; #48 moved to optional, 2026-10-14). |
 | `deviceTypes` | Device types the measurement applies to, e.g. `["IGBT"]` for #19. |
 | `methods` | Struct array (below). |
 | `defaultMethod` | Method id used when neither the preset nor the user selects one. |
@@ -135,6 +135,7 @@ Rows map onto a small number of reusable implementations:
 | `intervalBetween` | t(stop) − t(start) | #13–23, #41, #42 |
 | `integralBetween` | ∫ f(signals) dt between two thresholds, or a threshold plus a fixed duration | #5, 6, 8, 9, 44, 45, 48 |
 | `slopeBetween` | Δx / Δt between two levels | #24–26, #46 avg |
+| `slopeBandMax` | Maximum Δx / Δt over any amplitude band of x % of the swing, slid across the transition (user request Q10; default x = 20 %, tagged e.g. `[Custom: max over 20 % band]`) | #24–26 |
 | `extremumIn` | max or min within a region, optionally relative to a reference | #29–39 |
 | `derivativeExtremum` | max \|dx/dt\| within a region (filter and derivative stated) | #27, 28, 46 peak |
 | `levelIn` | Mean or median over a region | #1–4, 49, 50, 52, 53 |
@@ -144,13 +145,14 @@ Rows map onto a small number of reusable implementations:
 ## 4. Methods, presets and tags
 
 - **Selection.** `S.measurements.preset` sets every measurement's method at once. `S.measurements.<id>.method` and `S.measurements.<id>.params` override it per measurement, and an explicit override beats the preset. The result records both the preset and the effective method.
-- **Enable/disable.** All core measurements are attempted by default. Optional ones (#49–55) are enabled per measurement or by group.
+- **Enable/disable.** All core measurements are attempted by default. Optional ones (#48–55) are enabled explicitly by the user (§10.1).
 - **Tag on every result.** The value is always formatted as `"E_off = 1.23 mJ [IEC 60747-9]"`. Result tables carry `methodId` and `methodTag` columns. Values with different tags are never placed in the same comparison or summary column.
 - **Device-type check.** A new bucket field `cfg.deviceType` (`"MOSFET"` | `"IGBT"`) is compared against each method's `standard`. An IEC-9 method on a MOSFET is flagged. Device-specific rows such as #19 are skipped with a reason on the wrong device type.
 - **Presets:**
   - **IEC 60747-8 and IEC 60747-9:** built directly from the `[IEC-8]`/`[IEC-9]`/`[IEC-2]` tags in the spec. Rows with no IEC definition (#24–28, #22, #23) use their first `[Conv]` option, and the report says so.
   - **IGBT module datasheet style:** my reading is E_on = I_D 10 % → V_DS 2 % of V_DC, and E_off = V_DS 10 % of V_DC → I_D 2 %. Needs confirmation (Q4).
   - **Tektronix WBG-DPT and R&S app note:** I will not guess their method choices. They need your per-row mapping (Q4).
+  - **Decision (2026-10-14): IEC presets only** (`"IEC-8"` = 60747-8 + 60747-2, `"IEC-9"` = 60747-9 + 60747-2). Every `[Conv]` and `[Custom]` option of every row stays individually selectable for flexibility. Other presets can be added later as data without code changes.
 
 ## 5. Level model
 
@@ -176,7 +178,17 @@ The zero level is **measured** as the off-state current median. **[data]** On th
 | turn-on | Measured zero | I_on (#4) |
 | turn-off | I_off (#3) | Measured zero |
 
-The current keeps ramping through the on-time (di/dt = V/L). A plain median of the post-switching current would therefore be biased, which is why #4 offers the extrapolated method.
+**I_on and I_off come from the inductor current by default** (user decision, 2026-10-14). The method is new, tagged `[Conv] I_L at switching instant`:
+
+- **Why I_L:** the inductor current is continuous. The recovery hump and ringing circulate in the commutation loop and never pass through the inductor, so I_L at the switching instant *is* the commutated current. No extrapolation is needed.
+- **Switching instant:** given by already-defined thresholds. Turn-off: V_GS 90 % falling (the #3 option). Turn-on: V_GS 10 % rising, the IEC-9 energy and delay start. Both use the `"swing"` gate basis (Q3).
+- **Reading I_L:** the mean of I_L over a centred window of ±D/2 around the instant. This is unbiased on the linear inductor ramp and averages out the Iout quantization (4 A steps on the example).
+- **Fallback order:**
+  1. I_L from the same collection.
+  2. The spec's I_D-based options for #3/#4, labelled with their own tag.
+
+  No cross-collection I_L is used (same-collection rule). For the turn-on fallback the extrapolated option of #4 stays available.
+- **Consistency:** when I_L is the 100 % level for I_D thresholds, the two sensors must agree. Without normalization (§7.3), a 6.9 % gain mismatch moves an "I_D 90 %" threshold to about 96 % of I_D's own final value. Results therefore record whether the current sensors were normalized.
 
 ### 5.3 Gate voltage
 
@@ -252,6 +264,41 @@ Compares a level-type result with the channel's quantization step (estimated fro
 | `cfg.ratings.VgsThMin` | #38: V_GS(th),min at the highest T_j. |
 | `cfg.circuit.Coss` [F] | #47 ringing option. |
 
+### 7.3 Current-sensor normalization (user proposal, 2026-10-14)
+
+**Purpose.** During the on-state of the active device, all of the inductor current flows through it, so I_D,active = I_L. Two current sensors in one collection can therefore be calibrated against each other on the on-state segments of every pulse. This applies the same correction everywhere I_L and I_D are combined: operating point, thresholds, derived diode current, E_io.
+
+**Configuration** (bucket config, because it depends on the sensor setup):
+
+```matlab
+cfg.currentNormalization.enable    = false;     % opt-in
+cfg.currentNormalization.reference = "Iout";    % "Iout" | "Id": the sensor taken as truth
+```
+
+**Method:**
+
+1. **Segments:** the on-state of each pulse, from the end of its turn-on window to the start of its turn-off window, so recovery and ringing are excluded.
+2. **Fit:** I_ref = k·I_other + b by least squares over all pulses. A multi-pulse train spans the full current range, which makes the fit well-conditioned.
+3. **Apply:** k and b go to the non-reference channel as a declared correction (`corrections.gain`, `corrections.offset`). `getSignal` applies them like deskew and invert. Raw data is never modified.
+4. **Accept or refuse:** the fit is refused, and nothing is applied, if either check fails:
+   - the residual rms is large compared with the sensors' noise and quantization;
+   - the per-pulse ratio I_ref/I_other spreads widely, which points to non-linearity such as saturation or probe droop, where one gain cannot fix it.
+
+   The thresholds are defined in 5c and are data-derived like the others.
+5. **Reporting:** k, b, residual, per-pulse spread and the reference sensor appear in the collection's issues and in every result's provenance (`currentsNormalized = true/false`).
+
+**[data]** Example, normalized to Iout:
+
+| Quantity | Value |
+|---|---|
+| Fit | k = 1.0691, b = −0.10 A |
+| Residual | 1.98 A rms, at the quantization level (Iout steps 4 A, Id 2 A) |
+| Per-pulse ratio | 1.065–1.071 over 32–572 A |
+
+A pure gain error with a clean fit, which this method corrects well. The data shows the sensors disagree by 6.9 %; only the user can say which is right.
+
+**Scope.** Normalization needs both sensors in the same collection. A collection with only one of them is not normalized and is reported as such. Reusing constants across collections (same physical sensor) is left as a possible later addition.
+
 **Rows 23 and 37/38 [data]:**
 
 - **#23 dead time** is skipped with the reason "complementary gate not actively driven" when the non-active gate has no qualified edges. On the example, the HS gate sits at −5.6 V: non-synchronous, so #23 doesn't apply.
@@ -279,8 +326,8 @@ One row per (measurement, method, event, collection), with these fields:
 1. **#5/#6 fixed 10–20 µs windows** do not fit multi-pulse trains (§2.4). They are skipped when outside the territory.
 2. **#47 ringing ↔ #55 LC is circular.** #47's ringing option needs C, and #55's LC option needs L from #47. The registry rejects the cycle: #55 LC requires #47 by the dip or overshoot method.
 3. **#43 IEC-2 S_rr** is deferred, as the spec says.
-4. **#48 Q_oss doesn't say which device and current.** I assume the non-active device at the active device's turn-on, while its V_DS rises, integrating the diode current from its zero crossing. Confirm (Q8).
-5. **#4 extrapolated I_on** needs two definitions: the fit window (from the settling time to the end of the event window?) and the extrapolation instant (V_GS 10 %? the I_D 10 % crossing?) (Q8).
+4. **#48 Q_oss** is **moved to the optional measurements** (user decision, 2026-10-14). Method: the non-active device at the active device's turn-on. Its measured current is integrated from its zero crossing until its V_DS reaches 90 % of its peak. This is the only physically separable case: the active device's drain probe sees channel and capacitive current together. It requires the non-active I_D; the derived current is excluded by Q5.
+5. **#4 extrapolated I_on** is superseded as the default by I_L at the switching instant (§5.2). The extrapolated option remains selectable, with fit window = settling time + 2·D and instant = V_GS 10 % rising.
 6. **#9 direct** requires the non-active I_D, which the spec notes adds loop inductance. It is skipped automatically when that signal is absent.
 7. **#12 phase-leg** adds f_s·E_rr from the same pair event. That requires #45 to be available on the turn-on of the same pair.
 
@@ -305,12 +352,13 @@ Each has a recommendation, so a short "agree" is enough.
 | # | Status |
 |---|---|
 | Q1 | **Agreed.** I_D positive drain → source; I_L positive into the active device's drain when it conducts. |
-| Q2 | **Open.** The user wants low-current events (e.g. the first turn-on) measured rather than excluded, and positive quantities clamped at 0. Counter-proposal under discussion: a per-threshold noise-floor rule instead of a per-event current rule, and flag-not-clamp. |
+| Q2 | **Agreed (2026-10-14).** No per-event exclusion. A percent threshold is used only if min(p, 1 − p)·A ≥ 3σ, where A is the signal's transition amplitude and σ its noise on the settled segment; otherwise the dependent result is skipped with a reason. Reverse recovery additionally needs measurable forward diode current. Results are **not clamped**: raw values are kept and flagged `belowNoiseFloor`. An optional `S.report.clampNonNegative` changes only the displayed value, with a marker. |
 | Q3 | **Agreed.** Gate basis `"swing"` (V_G(off) → V_G(on)), stated in results. |
-| Q4 | **Open.** Explanation requested. |
+| Q4 | **Decided (2026-10-14).** IEC presets only (§4); all row options stay individually selectable. |
 | Q5 | **Agreed.** Derived diode current is opt-in, refused if the conduction mismatch is more than 25 % of I_rrm. |
 | Q6 | **Agreed.** User windows and settling are proportional to D, with absolute overrides. |
 | Q7 | **Agreed.** New signals `Vdc`, `Vds-HS-clamp`, `Vds-LS-clamp`. |
-| Q8 | **Open.** Explanation requested. |
+| Q8 | **Decided (2026-10-14).** I_on/I_off from I_L at the switching instant (§5.2). Optional current-sensor normalization (§7.3). #48 Q_oss moved to optional, using the non-active-device method (§9, issue 4). |
 | Q9 | **Agreed.** Composites (E_sw etc.) use results from the same collection only. |
-| Q10 | **New, user request.** A sliding-window maximum option for the slew-rate measurements (#24–26). Interpretation to confirm: time-based vs amplitude-based window. |
+| Q10 | **Decided (2026-10-14).** Amplitude-band sliding maximum (`slopeBandMax`, §3.2) for #24–26. |
+| — | **Optional measurements** (#48–55) are enabled explicitly by the user. Until a UI exists, this is a labelled block in `dpt_analyzer.m` that sets `settingsOverrides.measurements.enableOptional`; a future UI would write the same field. |
