@@ -299,3 +299,18 @@ Each has a recommendation, so a short "agree" is enough.
 | Q7 | **New signal names:** `Vdc`, `Vds-HS-clamp`, `Vds-LS-clamp`. | Adopt. |
 | Q8 | **#48 and #4 clarifications** (§9, issues 4–5). | Your answer needed. |
 | Q9 | **Cross-collection composites.** May E_sw take E_on and E_off from different collections, with a check that the operating points match? | Same collection only (strict) for now; can be relaxed later. |
+
+### 10.1 Answers (2026-10-13)
+
+| # | Status |
+|---|---|
+| Q1 | **Agreed.** I_D positive drain → source; I_L positive into the active device's drain when it conducts. |
+| Q2 | **Open.** The user wants low-current events (e.g. the first turn-on) measured rather than excluded, and positive quantities clamped at 0. Counter-proposal under discussion: a per-threshold noise-floor rule instead of a per-event current rule, and flag-not-clamp. |
+| Q3 | **Agreed.** Gate basis `"swing"` (V_G(off) → V_G(on)), stated in results. |
+| Q4 | **Open.** Explanation requested. |
+| Q5 | **Agreed.** Derived diode current is opt-in, refused if the conduction mismatch is more than 25 % of I_rrm. |
+| Q6 | **Agreed.** User windows and settling are proportional to D, with absolute overrides. |
+| Q7 | **Agreed.** New signals `Vdc`, `Vds-HS-clamp`, `Vds-LS-clamp`. |
+| Q8 | **Open.** Explanation requested. |
+| Q9 | **Agreed.** Composites (E_sw etc.) use results from the same collection only. |
+| Q10 | **New, user request.** A sliding-window maximum option for the slew-rate measurements (#24–26). Interpretation to confirm: time-based vs amplitude-based window. |
