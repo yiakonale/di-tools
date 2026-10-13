@@ -9,7 +9,7 @@ if nargin < 1
 end
 addpath(fileparts(fileparts(mfilename('fullpath'))));
 S = dptSettings(struct('report', struct('echoWarnings', false)));
-cfg = struct('bucketPath', "", 'activeDevice', "LS", 'expectedPulseCount', [], ...
+cfg = struct('bucketPath', "", 'activeDevice', "LS", 'deviceType', "MOSFET", 'expectedPulseCount', [], ...
     'gate', struct('nominal', struct('high', 18, 'low', -5)));
 if isfolder(root), rmdir(root, 's'); end
 mkdir(root);

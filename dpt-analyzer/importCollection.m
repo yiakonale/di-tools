@@ -231,6 +231,9 @@ c.deskew = entry.deskew;
 c.deskewApplied = n * dt;
 c.shift = n;
 c.invert = entry.invert;
+% Current-sensor normalization (normalizeCurrentSensors) sets these.
+c.gain = 1;
+c.offset = 0;
 
 if entry.deskew ~= 0 || entry.invert
     issues = [issues; dptIssue("dpt:import:correctionApplied", "info", "import", name, ...

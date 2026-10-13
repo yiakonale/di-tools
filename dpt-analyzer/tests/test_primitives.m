@@ -94,7 +94,7 @@ check(abs(s2 + expected) / expected < 1e-3, 'falling edge: negative slope, same 
 
 %% Example record: real-data sanity -------------------------------------------------
 S = dptSettings(struct('report', struct('echoWarnings', false)));
-cfg = validateBucketConfig(struct('bucketPath', "data/example", 'activeDevice', "LS", ...
+cfg = validateBucketConfig(struct('bucketPath', "data/example", 'activeDevice', "LS", 'deviceType', "MOSFET", ...
     'expectedPulseCount', 10, 'gate', struct('nominal', struct('high', 18, 'low', -5))), S, codeDir);
 col = importCollection(fullfile(cfg.bucketPath, 'collection_A'), cfg, S);
 ev = detectGateTransitions(col, cfg, S); al = alignCollections(ev, S); tl = buildPulseTimeline(ev, al, cfg, S);

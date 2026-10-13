@@ -22,6 +22,7 @@ clear; clc; close all;
 %% Bucket configuration ------------------------------------------------
 cfg.bucketPath         = "data/example";   % relative to this script, or absolute
 cfg.activeDevice       = "LS";             % "HS" | "LS"
+cfg.deviceType         = "MOSFET";         % "MOSFET" | "IGBT"
 cfg.expectedPulseCount = 10;               % advisory only; [] = no check
 cfg.gate.nominal.high  = 18;               % [V] active gate on-state drive
 cfg.gate.nominal.low   = -5;               % [V] active gate off-state drive

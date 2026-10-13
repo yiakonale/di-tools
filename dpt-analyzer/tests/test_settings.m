@@ -22,7 +22,9 @@ end
 ok = struct('detection', struct('reference', struct('strategy', "absolute", 'absolute', 3)));
 dptSettings(ok); fprintf('absolute OK\n');
 ok = struct('conditioning', struct('method', 'movmedian', 'windowDuration', 2e-9)); dptSettings(ok); fprintf('char option + movmedian OK\n');
-ok = struct('measurements', struct('swEnergy', struct('x', 1))); S3 = dptSettings(ok); assert(S3.measurements.swEnergy.x == 1); fprintf('open measurements group OK\n');
+ok = struct('measurements', struct('methods', struct('Ion', "extrapolatedId"))); S3 = dptSettings(ok); assert(S3.measurements.methods.Ion == "extrapolatedId" && isequal(S3.measurements.methods.Ioff, ["inductorAtInstant", "idAtGate90"])); fprintf('measurement method override OK\n');
+try, dptSettings(struct('measurements', struct('methods', struct('Eonn', "x")))); fprintf('FAIL measurements typo\n'); catch e, fprintf('measurements typo -> %s\n', e.message); end
+try, dptSettings(struct('measurements', struct('common', struct('gateBasis', "half")))); fprintf('FAIL gateBasis\n'); catch e, fprintf('gateBasis -> %s\n', e.message); end
 disp(S.signals.catalog); fprintf('tolerance %.2f V\n', S.gate.levels.tolerance);
 bad = S.signals.catalog; bad.name(2) = "Vgs-HS";
 try, dptSettings(struct('signals', struct('catalog', bad))); fprintf('FAIL dup\n'); catch e, fprintf('dup name -> %s\n', e.message); end

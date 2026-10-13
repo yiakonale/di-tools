@@ -9,6 +9,10 @@ function cfg = validateBucketConfig(cfg, S, baseDir)
 %       folder), never against the current folder.
 %
 %   Unknown fields are errors, so a misspelled setting is not ignored.
+%   Optional fields that are absent are filled with their defaults:
+%     cfg.nominal.busVoltage / .testCurrent  [] ([Custom] references)
+%     cfg.currentNormalization.enable        false
+%     cfg.currentNormalization.reference     "Iout" ("Iout" | "Id")
 
 arguments
     cfg (1,1) struct
@@ -16,7 +20,8 @@ arguments
     baseDir (1,1) string
 end
 
-checkFields(cfg, ["bucketPath", "activeDevice", "expectedPulseCount", "gate"], "cfg");
+checkFields(cfg, ["bucketPath", "activeDevice", "deviceType", "expectedPulseCount", "gate"], ...
+    "cfg", ["nominal", "currentNormalization"]);
 checkFields(cfg.gate, "nominal", "cfg.gate");
 checkFields(cfg.gate.nominal, ["high", "low"], "cfg.gate.nominal");
 
@@ -36,6 +41,14 @@ cfg.activeDevice = textScalar(cfg.activeDevice, "cfg.activeDevice");
 if ~any(cfg.activeDevice == ["HS", "LS"])
     error('dpt:config:invalidValue', ...
         'cfg.activeDevice must be "HS" or "LS", not "%s".', cfg.activeDevice);
+end
+
+% Device type: selects device-specific measurements and flags methods
+% from a standard for the other device type.
+cfg.deviceType = textScalar(cfg.deviceType, "cfg.deviceType");
+if ~any(cfg.deviceType == ["MOSFET", "IGBT"])
+    error('dpt:config:invalidValue', ...
+        'cfg.deviceType must be "MOSFET" or "IGBT", not "%s".', cfg.deviceType);
 end
 
 % Expected pulse count (advisory)
@@ -70,15 +83,57 @@ end
 cfg.gate.nominal.high = double(hi);
 cfg.gate.nominal.low  = double(lo);
 
+% Nominal operating point (optional; used only by "nominal" methods)
+if ~isfield(cfg, 'nominal')
+    cfg.nominal = struct();
+end
+checkFields(cfg.nominal, strings(1, 0), "cfg.nominal", ["busVoltage", "testCurrent"]);
+for f = ["busVoltage", "testCurrent"]
+    if ~isfield(cfg.nominal, f)
+        cfg.nominal.(f) = [];
+    end
+    v = cfg.nominal.(f);
+    if ~isempty(v) && ~(isnumeric(v) && isscalar(v) && isreal(v) && isfinite(v) && v > 0)
+        error('dpt:config:invalidValue', 'cfg.nominal.%s must be [] or a positive scalar.', f);
+    end
+    cfg.nominal.(f) = double(v);
+end
+
+% Current-sensor normalization (optional, opt-in)
+if ~isfield(cfg, 'currentNormalization')
+    cfg.currentNormalization = struct();
+end
+checkFields(cfg.currentNormalization, strings(1, 0), "cfg.currentNormalization", ...
+    ["enable", "reference"]);
+if ~isfield(cfg.currentNormalization, 'enable')
+    cfg.currentNormalization.enable = false;
+end
+if ~isfield(cfg.currentNormalization, 'reference')
+    cfg.currentNormalization.reference = "Iout";
+end
+if ~(islogical(cfg.currentNormalization.enable) && isscalar(cfg.currentNormalization.enable))
+    error('dpt:config:invalidValue', 'cfg.currentNormalization.enable must be true or false.');
+end
+cfg.currentNormalization.reference = textScalar(cfg.currentNormalization.reference, ...
+    "cfg.currentNormalization.reference");
+if ~any(cfg.currentNormalization.reference == ["Iout", "Id"])
+    error('dpt:config:invalidValue', ...
+        'cfg.currentNormalization.reference must be "Iout" or "Id".');
+end
+
 end
 
 % =====================================================================
-function checkFields(s, expected, name)
+function checkFields(s, expected, name, optional)
+% EXPECTED fields are required; OPTIONAL ones may be absent.
+if nargin < 4
+    optional = strings(1, 0);
+end
 if ~(isstruct(s) && isscalar(s))
     error('dpt:config:invalidValue', '%s must be a scalar struct.', name);
 end
 actual = string(fieldnames(s))';
-unknown = setdiff(actual, expected);
+unknown = setdiff(actual, [expected, optional]);
 if ~isempty(unknown)
     error('dpt:config:unknownField', 'Unknown field(s) in %s: %s.', ...
         name, strjoin(unknown, ", "));

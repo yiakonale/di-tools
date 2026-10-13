@@ -21,6 +21,10 @@ function tl = buildPulseTimeline(evs, al, cfg, S)
 %     core      the collection's qualified gate edge [coreStart coreEnd]
 %     adaptive  [coreStart - pre*D, coreEnd + post*D], D = core duration
 %     fixed     edge time + S.windows.fixed.<kind>
+%     territory [midpoint to previous edge, midpoint to next edge],
+%               clipped to the collection's record. Used for settled
+%               levels, ringing decay, peaks and fixed-duration windows
+%               (MEASUREMENT_DESIGN.md section 2.4).
 %   Both are limited to the midpoints between neighbouring edges when
 %   S.windows.limitToNeighborMidpoint is set (column "limited"). A window
 %   outside the record uses the fixed fallback if allowed and it fits,
@@ -74,10 +78,16 @@ end
 
 %% Territory of each edge: midpoints to its neighbours
 territory = [-inf(E, 1), inf(E, 1)];
-if S.windows.limitToNeighborMidpoint && E > 1
+if E > 1
     mids = (edgeTime(1:end-1) + edgeTime(2:end)) / 2;
     territory(2:end, 1) = mids;
     territory(1:end-1, 2) = mids;
+end
+% Windows are limited to the territory only if requested.
+if S.windows.limitToNeighborMidpoint
+    limit = territory;
+else
+    limit = [-inf(E, 1), inf(E, 1)];
 end
 
 %% Windows
@@ -88,6 +98,8 @@ wStart = nan(n, 1);
 wEnd = nan(n, 1);
 cStart = nan(n, 1);
 cEnd = nan(n, 1);
+terrStart = nan(n, 1);
+terrEnd = nan(n, 1);
 wMethod = strings(n, 1);
 wLimited = false(n, 1);
 wTruncated = false(n, 1);
@@ -101,6 +113,8 @@ for c = 1:C
         r = r + 1;
         wEdge(r) = j;
         wCol(r) = c;
+        terrStart(r) = max(territory(j, 1), span(1));
+        terrEnd(r) = min(territory(j, 2), span(2));
         m = al.match(j, c);
         if isnan(m)
             wNote(r) = "edge not present in this collection";
@@ -120,12 +134,12 @@ for c = 1:C
             w = tEdge + S.windows.fixed.(kind(j));
             method = "fixed";
         end
-        [w, limited] = limitTo(w, territory(j, :));
+        [w, limited] = limitTo(w, limit(j, :));
         note = "";
 
         if ~fits(w, span) && method == "adaptive" && S.windows.useFixedAsFallback ...
                 && ~isempty(S.windows.fixed.(kind(j)))
-            [wf, limitedF] = limitTo(tEdge + S.windows.fixed.(kind(j)), territory(j, :));
+            [wf, limitedF] = limitTo(tEdge + S.windows.fixed.(kind(j)), limit(j, :));
             if fits(wf, span)
                 w = wf;
                 limited = limitedF;
@@ -155,9 +169,10 @@ for c = 1:C
     end
 end
 
-windows = table(wEdge, wCol, wStart, wEnd, cStart, cEnd, wMethod, wLimited, ...
-    wTruncated, wValid, wNote, 'VariableNames', {'edgeId', 'collection', ...
-    'startTime', 'endTime', 'coreStartTime', 'coreEndTime', 'method', 'limited', ...
+windows = table(wEdge, wCol, wStart, wEnd, cStart, cEnd, terrStart, terrEnd, ...
+    wMethod, wLimited, wTruncated, wValid, wNote, 'VariableNames', {'edgeId', ...
+    'collection', 'startTime', 'endTime', 'coreStartTime', 'coreEndTime', ...
+    'territoryStartTime', 'territoryEndTime', 'method', 'limited', ...
     'truncated', 'valid', 'note'});
 
 for c = 1:C

@@ -13,7 +13,7 @@ addpath(codeDir, fullfile(codeDir, 'sync'));
 example = fullfile(codeDir, 'data', 'example', 'collection_A');
 
 S = dptSettings(struct('report', struct('echoWarnings', false)));
-cfg = struct('bucketPath', "", 'activeDevice', "LS", 'expectedPulseCount', [], ...
+cfg = struct('bucketPath', "", 'activeDevice', "LS", 'deviceType', "MOSFET", 'expectedPulseCount', [], ...
     'gate', struct('nominal', struct('high', 18, 'low', -5)));
 if isfolder(root), rmdir(root, 's'); end
 mkdir(root);

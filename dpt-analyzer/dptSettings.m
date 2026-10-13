@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.5.0";
+S.schemaVersion = "0.6.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -68,12 +68,23 @@ S.schemaVersion = "0.5.0";
 %              drainVoltage of the active device" without naming signals
 %   device   : "HS" | "LS" | "" (not device-specific)
 %   units    : required verticalUnits of the scope export
+%
+% Sign conventions (Q1): I_D of each device is positive drain -> source;
+% Iout (inductor current) is positive in the direction that flows into
+% the active device's drain while it conducts. Fix a reversed probe with
+% "invert" in the channel map.
+%
+% Vdc is a dedicated bus-voltage channel. Vds-*-clamp are clamped or
+% clipped V_DS channels for on-state voltages (#49-52); they can be
+% mapped alongside the full-range Vds-* in the same collection.
 S.signals.catalog = table( ...
-    ["Vgs-HS"; "Vgs-LS"; "Vds-HS"; "Vds-LS"; "Id-HS"; "Id-LS"; "Iout"], ...
+    ["Vgs-HS"; "Vgs-LS"; "Vds-HS"; "Vds-LS"; "Id-HS"; "Id-LS"; "Iout"; ...
+     "Vdc"; "Vds-HS-clamp"; "Vds-LS-clamp"], ...
     ["gateVoltage"; "gateVoltage"; "drainVoltage"; "drainVoltage"; ...
-     "drainCurrent"; "drainCurrent"; "outputCurrent"], ...
-    ["HS"; "LS"; "HS"; "LS"; "HS"; "LS"; ""], ...
-    ["V"; "V"; "V"; "V"; "A"; "A"; "A"], ...
+     "drainCurrent"; "drainCurrent"; "outputCurrent"; ...
+     "busVoltage"; "drainVoltageClamped"; "drainVoltageClamped"], ...
+    ["HS"; "LS"; "HS"; "LS"; "HS"; "LS"; ""; ""; "HS"; "LS"], ...
+    ["V"; "V"; "V"; "V"; "A"; "A"; "A"; "V"; "V"; "V"], ...
     'VariableNames', {'name', 'quantity', 'device', 'units'});
 
 %% Gate drive ---------------------------------------------------------
@@ -287,9 +298,69 @@ S.windows.useFixedAsFallback = true;
 S.windows.onInsufficientCoverage = "skip";
 
 %% Measurements -------------------------------------------------------
-% Measurement-specific algorithm settings. Populated in Batch 5 once the
-% measurement list and definitions are specified.
-S.measurements = struct();
+% Method selection and shared parameters of the measurement framework
+% (MEASUREMENT_DESIGN.md). The methods themselves are defined in
+% measurements/measurementRegistry.m; this section only selects them and
+% sets their parameters. Lengths are in multiples of the event's gate-edge
+% duration D, so they scale with the device (Q6).
+
+% Noise-floor rule (Q2): a threshold, or a result, closer than k*sigma
+% to a level of the same signal is not resolvable.
+S.measurements.common.noiseFloorMultiple = 3;
+% Ringing has decayed when the signal stays within +/- settlingBand of
+% its settled level, as a fraction of the transition amplitude (Q6).
+S.measurements.common.settlingBand = 0.02;
+% Settled level = median of this final fraction of the territory (Q6).
+S.measurements.common.settledPortion = 0.25;
+% "User windows" ending at a gate instant (#1-4, #49), in D (Q6).
+S.measurements.common.averagingWindow = 1;
+% A value "at an instant" is the mean over +/- this, in D. On a linear
+% ramp (inductor current) the centred mean equals the instantaneous
+% value, without its sample noise and quantization.
+S.measurements.common.instantHalfWidth = 0.5;
+% Fit length for the extrapolated I_on of #4, in D.
+S.measurements.common.extrapolationFit = 2;
+% A level result smaller than this many ADC steps of its channel is
+% flagged resolution-limited (relative resolution worse than 10 %).
+S.measurements.common.resolutionSteps = 10;
+% Percentage basis of gate-voltage thresholds (Q3).
+%   "swing": V_G(off) -> V_G(on)    "zero": 0 -> V_G(on)
+S.measurements.common.gateBasis = "swing";
+
+% Acceptance of the current-sensor normalization (cfg.currentNormalization).
+% Refused if the fit residual exceeds maxResidualRatio times the expected
+% residual from the two sensors' own noise, or if any pulse's gain
+% differs from the fitted gain by more than maxGainSpread (a sign of
+% saturation or droop, which one gain cannot correct).
+S.measurements.normalization.maxResidualRatio = 2;
+S.measurements.normalization.maxGainSpread = 0.02;
+
+% Optional measurements (#48-55) run only when listed here ("all" = all).
+S.measurements.enableOptional = strings(1, 0);
+
+% Method preference per measurement: the first method whose required
+% signals exist in the collection is used and reported. "nominal" uses
+% cfg.nominal and is only used when listed.
+S.measurements.methods.VdcOff        = ["busChannel", "settledVds"];
+S.measurements.methods.VdcOn         = ["busChannel", "offStateVds"];
+S.measurements.methods.Ioff          = ["inductorAtInstant", "idAtGate90"];
+S.measurements.methods.Ion           = ["inductorAtInstant", "extrapolatedId"];
+S.measurements.methods.onStateWindow = "finalPortion";   % #49-51, #54 device
+S.measurements.methods.RonEff        = "averaged";
+S.measurements.methods.IfDiode       = ["inductorDuringBreak", "measuredDiode"];
+
+% Method parameters.
+% onStateWindow "delayToEnd": delay after V_DS reaches 10 % at turn-on
+% [s]; [] = the V_DS settling time.
+S.measurements.params.onStateWindow.delay = [];
+% onStateWindow "custom": [t0 t1] [s] relative to the turn-off V_GS 90 %
+% instant (both <= 0).
+S.measurements.params.onStateWindow.custom = [];
+% RonEff "timeResolved": delays [s] after V_DS reaches 10 % at turn-on.
+S.measurements.params.RonEff.delays = [];
+% Extra delay [s] after the turn-off ringing settles before the diode
+% forward window of #52-54 starts.
+S.measurements.params.breakWindow.delay = 0;
 
 %% Reporting ----------------------------------------------------------
 % Warnings are always collected in the results. This controls whether
@@ -317,8 +388,7 @@ for k = 1:numel(names)
         error('dpt:settings:unknownField', ...
             'Unknown settings field "%s".', fieldPath);
     end
-    % Recurse only into nested setting groups. S.measurements is an
-    % open group (empty until Batch 5), so it is replaced wholesale.
+    % Recurse into nested setting groups; anything else is replaced.
     if isstruct(S.(name)) && ~isempty(fieldnames(S.(name)))
         if ~isstruct(ov.(name)) || ~isscalar(ov.(name))
             error('dpt:settings:invalidOverrides', ...
@@ -459,9 +529,40 @@ mustBeOption(S.windows.onInsufficientCoverage, ["skip", "truncate"], ...
     'windows.onInsufficientCoverage');
 
 % Measurements
-if ~isstruct(S.measurements) || ~isscalar(S.measurements)
-    fail('measurements', 'must be a scalar struct.');
+M = S.measurements;
+mustBePositiveScalar(M.common.noiseFloorMultiple, 'measurements.common.noiseFloorMultiple');
+mustBeFraction(M.common.settlingBand, 'measurements.common.settlingBand');
+mustBeFraction(M.common.settledPortion, 'measurements.common.settledPortion');
+if M.common.settledPortion == 0
+    fail('measurements.common.settledPortion', 'must be greater than 0.');
 end
+mustBePositiveScalar(M.common.averagingWindow, 'measurements.common.averagingWindow');
+mustBePositiveScalar(M.common.instantHalfWidth, 'measurements.common.instantHalfWidth');
+mustBePositiveScalar(M.common.extrapolationFit, 'measurements.common.extrapolationFit');
+mustBePositiveScalar(M.common.resolutionSteps, 'measurements.common.resolutionSteps');
+mustBeOption(M.common.gateBasis, ["swing", "zero"], 'measurements.common.gateBasis');
+mustBePositiveScalar(M.normalization.maxResidualRatio, 'measurements.normalization.maxResidualRatio');
+mustBePositiveScalar(M.normalization.maxGainSpread, 'measurements.normalization.maxGainSpread');
+if ~isstring(M.enableOptional)
+    fail('measurements.enableOptional', 'must be a string array of measurement ids, or "all".');
+end
+% Method names are checked against the registry when measurements run.
+for name = string(fieldnames(M.methods))'
+    v = M.methods.(name);
+    if ~isstring(v) || isempty(v) || any(v == "")
+        fail("measurements.methods." + name, 'must be a non-empty string array of method ids.');
+    end
+end
+mustBeEmptyOrNonnegativeScalar(M.params.onStateWindow.delay, 'measurements.params.onStateWindow.delay');
+c = M.params.onStateWindow.custom;
+if ~isempty(c) && ~(isnumeric(c) && isequal(size(c), [1 2]) && all(isfinite(c)) && c(1) < c(2) && c(2) <= 0)
+    fail('measurements.params.onStateWindow.custom', 'must be [] or [t0 t1] with t0 < t1 <= 0 [s].');
+end
+d = M.params.RonEff.delays;
+if ~isempty(d) && ~(isnumeric(d) && isvector(d) && all(isfinite(d)) && all(d >= 0))
+    fail('measurements.params.RonEff.delays', 'must be [] or a vector of delays >= 0 [s].');
+end
+mustBeNonnegativeScalar(M.params.breakWindow.delay, 'measurements.params.breakWindow.delay');
 
 % Reporting
 mustBeLogicalScalar(S.report.echoWarnings, 'report.echoWarnings');
@@ -495,6 +596,12 @@ function mustBeNonnegativeScalar(v, field)
 mustBeRealScalar(v, field);
 if v < 0
     fail(field, 'must be non-negative.');
+end
+end
+
+function mustBeEmptyOrNonnegativeScalar(v, field)
+if ~isempty(v)
+    mustBeNonnegativeScalar(v, field);
 end
 end
 
