@@ -11,7 +11,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | 5a design approved (2026-10-14); **5b next** |
+| 5 | Measurement specification & registry | 5a approved; **5b primitives in review** (2026-10-14) |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -25,9 +25,9 @@ _Last session ended 2026-10-13. Every step is committed locally._
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync` (38 + 31 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives` (38 + 31 + 33 cases, plus the settings checks).
 
-**Next step: Batch 5b (shared primitives).**
+**Next step: Batch 5c** (current-sensor normalization, operating point #1–4, conduction #49–54), once 5b is reviewed.
 - [MEASUREMENT_DESIGN.md](MEASUREMENT_DESIGN.md) is approved; its §10.1 records every decision.
 - The user's specification is stored verbatim in [MEASUREMENT_SPEC.md](MEASUREMENT_SPEC.md); row numbers #1–#55 refer to it.
 - Sub-batch order: 5b primitives, then 5c operating point and conduction, 5d timing and slew, 5e energy, 5f stress, 5g reverse recovery, 5h parasitics, then Batch 6.
@@ -59,10 +59,29 @@ _Last session ended 2026-10-13. Every step is committed locally._
 | `sync/detectGateTransitions.m` | Measures the gate levels, qualifies edges by hysteresis, times them on a local smoothed copy. |
 | `sync/alignCollections.m` | Chooses the reference collection, matches edges, estimates offsets and residuals, excludes collections that cannot be aligned. |
 | `sync/buildPulseTimeline.m` | Universal edges, pulses, and per-(edge, collection) windows. |
+| `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`. |
 | `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
-| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`); formalized in Batch 7. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-14 — Batch 5b: shared primitives implemented
+
+- **Design choice:** the primitives are pure numeric functions with explicit arguments and do not read `S`. Defaults such as the noise-floor multiple and filter windows belong to the method layer (5c onward), where each can be justified on data. They live in `measurements/primitives/` (10 files) and are added to the entry script's path.
+- **Percent convention fixed: amplitude scale** (IEC): p % = low + p·(high − low), whatever the direction. "V_DS falls to 90 %" is the start of the fall. A test that used "fraction of transition completed" produced a negative t_vf, which exposed the ambiguity. Documented in `transitionThreshold` and design §5.4.
+- **Ringing frequency:**
+  - each crossing is timed at the midpoint of its first and last level crossings, and the half-period comes from a least-squares fit, so the 0.8 % bias on decaying ringing drops to 0.06 %;
+  - the hysteresis band must exceed both 3σ and one ADC step (on the example 3σ = 2.4 V < 2.8 V step, so code flicker had counted as crossings).
+- **Other choices:**
+  - filters and derivatives are zero-phase; samples without a complete window are returned as NaN, so edges never leak into results;
+  - Savitzky–Golay uses least-squares coefficients (no toolbox);
+  - `noiseLevel` takes the larger of the MAD estimate (after a linear detrend, so ramps are not counted as noise) and a quantization floor q/√12;
+  - `integrateBetween` interpolates the integrand at off-grid limits.
+- **Findings on the example record:**
+  - **Edge 17 (turn-on, about 500 A):** t_vf (90 → 10 %) = 114 ns, so the 10–90 % average dv/dt is 2.7 V/ns. But V_DS collapses from 224 V to 118 V in about 4.4 ns, so the 20 % band maximum is 27.4 V/ns and the Savitzky–Golay (11-sample) instantaneous maximum is 32.8 V/ns. This justifies Q10.
+  - **Edge 18 (turn-off):** t_vr = 60 ns, with average, band and instantaneous dv/dt of 5.1 / 6.0 / 7.5 V/ns. The ringing is a clean 45.9 MHz (half-periods 8.5–13.6 ns).
+  - V_DS noise is 0.81 V, which is the quantization floor of the 2.8 V step. The 10/90 % thresholds clear the 3σ noise floor by a factor of about 16.
+- **Verified:** `tests/test_primitives.m` passes 33 cases: exact synthetic checks of every primitive, plus real-data sanity checks including |avg| ≤ |band max| ≤ |instantaneous max|. All earlier suites still pass.
 
 ### 2026-10-14 — Batch 5a approved
 

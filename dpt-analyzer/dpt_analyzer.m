@@ -34,7 +34,8 @@ settingsOverrides = struct();
 % Only code folders go on the path. genpath is deliberately not used: it
 % would add every collection folder, each with its own channelMap.m.
 scriptDir = fileparts(mfilename('fullpath'));
-codeDirs = fullfile(scriptDir, ["", "sync", "measurements", "analysis"]);
+codeDirs = fullfile(scriptDir, ["", "sync", "measurements", ...
+    fullfile("measurements", "primitives"), "analysis"]);
 codeDirs = cellstr(codeDirs(isfolder(codeDirs)));
 addpath(codeDirs{:});
 

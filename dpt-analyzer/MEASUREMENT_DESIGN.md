@@ -135,7 +135,7 @@ Rows map onto a small number of reusable implementations:
 | `intervalBetween` | t(stop) − t(start) | #13–23, #41, #42 |
 | `integralBetween` | ∫ f(signals) dt between two thresholds, or a threshold plus a fixed duration | #5, 6, 8, 9, 44, 45, 48 |
 | `slopeBetween` | Δx / Δt between two levels | #24–26, #46 avg |
-| `slopeBandMax` | Maximum Δx / Δt over any amplitude band of x % of the swing, slid across the transition (user request Q10; default x = 20 %, tagged e.g. `[Custom: max over 20 % band]`) | #24–26 |
+| `slopeBandMax` | Maximum Δx / Δt over any amplitude band of x % of the swing, slid across the transition (user request Q10; default x = 20 %, tagged e.g. `[Custom: max over 20 % band]`). **[data]** On edge 17 (turn-on, about 500 A), the 10–90 % average is 2.7 V/ns. The steepest 20 % band is 27 V/ns: V_DS collapses from 224 V to 118 V in about 4.4 ns, between a slow initial fall and ringing back up. The Savitzky–Golay instantaneous maximum is 33 V/ns. | #24–26 |
 | `extremumIn` | max or min within a region, optionally relative to a reference | #29–39 |
 | `derivativeExtremum` | max \|dx/dt\| within a region (filter and derivative stated) | #27, 28, 46 peak |
 | `levelIn` | Mean or median over a region | #1–4, 49, 50, 52, 53 |
@@ -201,7 +201,19 @@ The two differ a lot. On the example, 10 % is −3.1 V with `"swing"` and +1.7 V
 
 The synchronization reference (25 % from the initial level) is separate. It only anchors the windows; measurements use their own thresholds.
 
-### 5.4 Crossings
+### 5.4 Percent convention: amplitude scale (fixed in 5b)
+
+Percentages are positions on the **amplitude scale** of the transition, independent of its direction (the IEC convention, and the one the spec uses throughout):
+
+> level(p) = low + p·(high − low), where low and high are the smaller and larger of the pre- and post-levels.
+
+So "V_DS falls to 90 %" is near the **start** of a falling edge. It does not mean "90 % of the transition completed". Every row is consistent with this reading:
+
+- t_vf runs from V_DS 90 % to 10 % at turn-on;
+- the IEC-8 E_on ends at V_DS 10 %;
+- E_off starts at V_GS 90 % falling.
+
+### 5.5 Crossings
 
 - **Search:** the first crossing in the threshold's direction, within the event window, after the start event (or, for end points, the first crossing after the start threshold).
 - **Interpolation:** linear between samples, done on the measurement filter's output when one is set (§6.1).
@@ -231,7 +243,12 @@ Central difference on the filtered signal, or the Savitzky–Golay derivative.
 
 ### 6.4 Ringing frequency
 
-From the zero crossings of x − settled level over the ringing segment: f_r = (number of half-periods) / (2 · span). Needed for #47 and #55. An FFT is the alternative if the zero-crossing estimate proves noisy.
+From the hysteresis-qualified crossings of x − settled level over the ringing segment. Needed for #47 and #55. Two refinements from 5b:
+
+- **Crossing timing.** Each crossing is timed at the midpoint of its first and last level crossings, and the half-period is the least-squares slope of crossing time against crossing number. Timing each crossing at its last level crossing biased a decaying 47 MHz test signal 0.8 % low; with these changes the error is 0.06 %.
+- **Band floor.** The hysteresis band must exceed **both the noise (3σ) and one ADC step**. **[data]** On the example, 3σ = 2.4 V is smaller than the 2.8 V step of V_DS, so a single-code flicker counted as a crossing.
+
+**[data]** The turn-off ringing on edge 18 is a clean 45.9 MHz, with half-periods of 8.5–13.6 ns. The 5h method will bound the segment from the overshoot peak to the settling time, which drops the first and last partial intervals.
 
 ### 6.5 Integration
 
