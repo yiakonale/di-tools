@@ -560,3 +560,110 @@ Effects:
 Threshold **end points** (e.g. I_D 2 % at turn-off, V_DS 2 % of V_DC at turn-on, settling) are searched up to the **territory end**, not only the event-window end. The event window is the anchor and the coverage check.
 
 **[data]** On the example, every such end point already lies 0.45–1.6 µs inside the window. Extending to the territory covers long IGBT tails without a device-specific `post` margin.
+
+## 13. Batch 5d: timing, slew rates, presets (2026-10-15)
+
+### 13.1 Level model as implemented (refines §5.2; for review)
+
+Percent thresholds use the **named signal's own levels**, as the specification words it ("the pre- and post-switching levels of the named signal"). They do not use I_on from I_L. This is also what keeps thresholds independent of the current sensors: they stay consistent even when two sensors disagree (6.9 % on the example without normalization). The reported operating point (#3/#4) stays I_L-based.
+
+`eventLevels` evaluates both levels at the edge's gate instant (V_GS 10 % rising / 90 % falling), from straight-line fits, so ramping signals are not biased:
+
+- **pre:** a fit over 1 D ending at the gate instant;
+- **post:** a fit over the final 25 % of the territory, extrapolated back to the gate instant.
+
+The noise σ is the larger of the two segments' noise.
+
+### 13.2 Threshold resolution
+
+`resolveThreshold` evaluates one declarative threshold (signal role, level p, basis, edge). The bases:
+
+| Basis | Level | Timing |
+|---|---|---|
+| `"transition"` | Amplitude scale of the signal's own levels | Crossing search |
+| `"Vdc"` | p · V_DC, from the bus model | Crossing search |
+| `"gate"` | Gate basis | Timed by `gateInstant` |
+| `"absolute"` | p itself | Crossing search |
+
+- **Search range:** from the previous threshold (or the window start) to the **territory end**, as decided in §12.7. First crossing in the transition direction.
+- **Noise floor:** every percent level must pass the Q2 rule.
+- **Never-reached 2 % levels:** the reason includes the IGBT hint from the spec's built-in checks.
+
+**`gateInstant` fix.** A gate level beyond the far hysteresis arm (e.g. 90 % on a rising edge, where the arm is at 85 %) only occurs after the qualified edge. It is now searched there, as the first crossing up to the window end. Before the fix, dV_GS/dt 10–90 % failed on every edge.
+
+### 13.3 Presets
+
+`S.measurements.preset`:
+
+- `"auto"`: IEC-8 for a MOSFET, IEC-9 for an IGBT;
+- `"IEC-8"`, `"IEC-9"`;
+- `"none"`: the first registry method of each row.
+
+Preferences set to `"preset"` (the default for #13–28) take the row's `presets.IEC8`/`IEC9` method from the registry. A method from the other device type's standard is flagged `methodDeviceMismatch`.
+
+| Row | IEC-8 preset | IEC-9 preset |
+|---|---|---|
+| t_d(on), t_d(off), t_on, t_off | IEC-8 | IEC-9 |
+| t_vf, t_vr | IEC-8 | Conv, same 90/10 levels (IEC-9 does not define them) |
+| t_ir, t_if | Conv, same 10/90 levels (the spec's "[Conv] same levels for MOSFETs") | IEC-9 |
+| t_z | — (IGBT only) | IEC-9 |
+| t_break, T_dt, all slew rates | First Conv option | First Conv option |
+
+Every row also has a `custom` method, configured in `S.measurements.params.custom.<id>`:
+
+- intervals: start/stop thresholds;
+- slew rates: [lo hi] levels;
+- dead time: level and basis.
+
+Without that configuration, the result is skipped with a pointer to the setting.
+
+### 13.4 Slew rates
+
+All slew rates are magnitudes; the direction is in the provenance. Turn-on and turn-off are separate events.
+
+| Kind | Definition |
+|---|---|
+| Average | Between two levels: 10–90 %, 20–80 %, or custom. |
+| Band maximum (Q10) | Steepest slope over any 20 % band within 10–90 %. The tag carries the band width. |
+| Maximum instantaneous (#27/#28) | Savitzky–Golay order 2. The window is **1 × the time the signal takes to cross the steepest band**, with a floor of 3 samples (a central difference). The tag states the filter. |
+
+**[data] Why the window adapts.** On quantized synthetic tanh edges, one band time gives n = 5 / 13 / 51 for τ = 2 / 5 / 20 ns, each within about 2 % of the true maximum. No fixed window works for all three: n = 11 gives −3 % / +1 % / +18 %. A window tied to the 10–90 % time would smooth away edge 17's 4.4 ns collapse.
+
+**The 3-sample floor.** If the floor sets the window, the edge is under-sampled and the result is flagged `derivativeUndersampled`, because it is biased low (−1.3 % on the 1 ns-sampled synthetic set).
+
+### 13.5 Dead time (#23)
+
+- **Measured:** from the outgoing gate's falling crossing to the incoming gate's rising crossing, at 50 % of each gate's own swing.
+- **Both transitions** are reported as separate events, labelled e.g. "HS->LS".
+- **Skipped** unless the complementary gate is actively driven, meaning it spends at least one gate-edge duration D on each side of its nominal midpoint within the territory.
+- **The crossing is searched over the whole territory,** so an overlap gives a negative value, flagged `negativeDeadTime`.
+
+### 13.6 Results (synthetic truth, example)
+
+**Synthetic** (gate τ = 20 ns, switch τs = 5 ns), all within 0.1 ns of the analytic values:
+
+| Quantity | Measured | Analytic |
+|---|---|---|
+| t_d(on) | 46.44 ns | 46.48 ns |
+| t_d(off) | 76.44 ns | 76.48 ns |
+| t_vf, t_vr | 11.07 ns | 10.99 ns |
+| t_on | 57.51 ns | 57.47 ns |
+| t_off | 87.51 ns | 87.47 ns |
+| t_break | 4.000 µs | 4.000 µs |
+| Dead time | 100 ns in both directions | 100 ns |
+
+Slew rates on the same set:
+
+| Quantity | Measured | Analytic |
+|---|---|---|
+| dv/dt band maximum | 39.4 V/ns | 39.46 V/ns |
+| Maximum dv/dt | 39.44 V/ns | 39.96 V/ns |
+| dV_GS/dt | 0.4187 V/ns | 0.4187 V/ns |
+
+**Example record:**
+
+- t_d(on) is 114 / 131 ns at pulse 3 / 9, t_vf 77 / 115 ns.
+- Maximum dv/dt at pulse 9 turn-on is 31.2 V/ns, with an automatic 19-sample (3.0 ns) window.
+- **t_on = t_d(on) + t_vf and t_off = t_d(off) + t_vr hold exactly** on every pulse, because the IEC-8 end points are shared.
+- Average ≤ band maximum ≤ instantaneous maximum on every turn-on.
+- The HS gate is not driven, so the dead time is skipped.

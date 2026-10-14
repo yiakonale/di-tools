@@ -11,7 +11,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | 5a, 5b done; **5c in review** (2026-10-14); 5d–5h to go |
+| 5 | Measurement specification & registry | 5a–5c done; **5d in review** (2026-10-15); 5e–5h to go |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -27,9 +27,9 @@ _Last session ended 2026-10-15. Every step is committed locally._
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections` (38 + 31 + 33 + 39 + 25 + 20 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing` (38 + 31 + 33 + 39 + 25 + 20 + 34 cases, plus the settings checks).
 
-**Next step (pick up here): Batch 5d** (timing #13–23, slew rates #24–28, and the IEC-8/IEC-9 presets). Threshold end points are searched up to the territory end (design §12.7, decided 2026-10-15). The open points of 2026-10-14 are worked through (decision record 2026-10-15). The bus-voltage plan below is kept for reference.
+**Next step (pick up here): Batch 5e**, switching energy and power (#5–12). It builds on 5d's declarative thresholds (`resolveThreshold`: bases transition, Vdc, gate, absolute) and on the bus model (#8 E_io). 5d is implemented and awaiting review (design §13). The bus-voltage plan below is kept for reference.
 
 _Done 2026-10-15:_
 1. **Config:** `cfg.circuit.Cdc` [F] and `cfg.circuit.CdcTolerance` (default 0.2). Settings: a V_DC source preference list (busChannel, kvl, chargeDroop, constant).
@@ -85,12 +85,29 @@ _Done 2026-10-15:_
 | `measurements/evaluateMeasurement.m` | Optional/device gating, method selection by preference and available signals, skip reasons. |
 | `measurements/eventContext.m`, `gateInstant.m`, `windowStats.m`, `resolveRole.m`, `makeResult.m`, `valueFlags.m`, `formatResult.m` | Framework helpers: event times in corrected time, V_GS p % instants, window statistics, role to signal, result skeleton, quality flags, tagged one-line output. |
 | `measurements/measureBusVoltage.m`, `measureSwitchingCurrent.m`, `measureConduction.m` | Implementations of #1–2, #3–4 and #49–54. |
+| `measurements/eventLevels.m`, `resolveThreshold.m` | Level model (the signal's own pre/post levels at the gate instant) and declarative threshold resolution (5d). |
+| `measurements/measureInterval.m`, `measureSlew.m`, `measureDeadTime.m` | Timing #13–22, slew rates #24–28, dead time #23. |
 | `tests/makeSyntheticDPT.m` | Synthetic phase-leg generator with known truth, for measurement tests. |
 | `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`. |
 | `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
-| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`); formalized in Batch 7. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-15 — Batch 5d: timing, slew rates, presets
+
+- **Implemented:** #13–28 (16 registry entries) with declarative interval and slew methods, presets (`"auto"` / `"IEC-8"` / `"IEC-9"` / `"none"`, with a per-row mapping in the registry), `custom` methods for every row, and the `methodDeviceMismatch` flag. Settings 0.9.0.
+- **For review — level model refined (design §13.1):** percent thresholds use the **named signal's own levels** (pre/post line fits evaluated at the gate instant), not I_on from I_L. This follows the spec's wording and keeps thresholds independent of the current sensors. The operating point stays I_L-based.
+- **[data] Derivative window for #27/#28:** Savitzky–Golay order 2 with a window of 1 × the steepest-band crossing time. On quantized synthetic edges it is within about 2 % for τ = 2–20 ns, where no fixed window works. The 3-sample floor is flagged `derivativeUndersampled`.
+- **Fixes during 5d:**
+  - `gateInstant` searches levels beyond the far hysteresis arm after the edge (dV_GS/dt 10–90 % had failed);
+  - the dead time searches the whole territory, so an overlap gives a flagged negative value.
+- **End points are searched to the territory end** (design §12.7), as decided.
+- **Synthetic generator:** an optional complementary HS gate with a dead time (`Vgs-HS`, `deadTime`).
+- **Verified:**
+  - `tests/test_timing.m`: 34 cases pass. Analytic timing to 0.1 ns; slew rates; dead time in both directions and an overlap; presets and the mismatch flag; overrides; custom methods.
+  - Example: t_on = t_d(on) + t_vf and t_off = t_d(off) + t_vr exactly on every pulse; average ≤ band maximum ≤ instantaneous maximum.
+  - All earlier suites pass.
 
 ### 2026-10-15 — Open points worked through
 

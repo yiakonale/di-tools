@@ -18,6 +18,12 @@ function results = evaluateMeasurement(def, ctx, S)
 %        a bus-voltage model (col.busVoltage, busVoltageModel).
 %     4. If none is available, the result is "skipped" and the reason
 %        lists what each preferred method was missing.
+%
+%   Presets: a "preset" entry in the preference list is replaced by
+%   def.presets.(IEC8|IEC9) for S.measurements.preset ("auto" follows
+%   cfg.deviceType), or the first registry method for "none". A result
+%   whose method comes from the other device type's standard is flagged
+%   "methodDeviceMismatch".
 
 arguments
     def (1,1) struct
@@ -42,6 +48,7 @@ if def.methodKey == ""
     prefs = known;
 else
     prefs = S.measurements.methods.(def.methodKey);
+    prefs = expandPreset(prefs, def, cfg, S);
     unknown = setdiff(prefs, known);
     if ~isempty(unknown)
         error('dpt:settings:unknownMethod', ...
@@ -57,8 +64,14 @@ for id = prefs
     [ok, sig, missing] = available(m, present, ctx.col, cfg, S);
     if ok
         results = def.fn(def, m, ctx, sig, S);
+        mismatch = (m.standard == "IEC-8" && cfg.deviceType == "IGBT") || ...
+            (m.standard == "IEC-9" && cfg.deviceType == "MOSFET");
         for k = 1:numel(results)
             results(k).provenance.signals = sig;
+            results(k).provenance.preset = presetName(cfg, S);
+            if mismatch
+                results(k).flags = unique([results(k).flags, "methodDeviceMismatch"], 'stable');
+            end
         end
         return
     end
@@ -98,6 +111,32 @@ for s = m.requires
     sig.(s.slot + "Role") = s.roles(hit);
 end
 ok = true;
+end
+
+function prefs = expandPreset(prefs, def, cfg, S)
+% Replace "preset" by the registry's method for the active standard.
+k = find(prefs == "preset");
+if isempty(k)
+    return
+end
+preset = presetName(cfg, S);
+if preset == "none" || ~isfield(def.presets, erase(preset, "-"))
+    id = def.methods(1).id;
+else
+    id = def.presets.(erase(preset, "-"));
+end
+prefs = unique([prefs(1:k-1), id, prefs(k+1:end)], 'stable');
+end
+
+function p = presetName(cfg, S)
+p = S.measurements.preset;
+if p == "auto"
+    if cfg.deviceType == "IGBT"
+        p = "IEC-9";
+    else
+        p = "IEC-8";
+    end
+end
 end
 
 function r = skipped(def, ctx, reason)

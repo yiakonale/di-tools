@@ -4,7 +4,8 @@ function R = measurementRegistry()
 %   R = measurementRegistry() returns a struct array with one entry per
 %   measurement (MEASUREMENT_DESIGN.md section 3). Row numbers refer to
 %   MEASUREMENT_SPEC.md. Entries are added group by group (Batch 5c-5h);
-%   this version holds the operating point (#1-4) and conduction (#49-54).
+%   this version holds the operating point (#1-4), timing (#13-23), slew
+%   rates (#24-28) and conduction (#49-54).
 %
 %   Entry fields
 %     id, row, symbol, name, category, unit
@@ -143,6 +144,153 @@ R = add(R, entry("PcondDiode", 54, "P_cond,F", "Conduction power (diode)", "Cond
         "mean of V_F * I_F over the diode window of #52 (I_F from I_L, else the measured diode current)", ...
         [VdiodeSlot, slot("I", ["outputCurrent", "drainCurrent@nonActive"]), VnonActive, gate]), true));
 
+%% Timing (#13-23) and slew rates (#24-28) ----------------------------------
+R = addTimingAndSlew(R);
+
+end
+
+% =====================================================================
+function R = addTimingAndSlew(R)
+% Declarative methods: each interval is a start and a stop threshold
+% (th), resolved by resolveThreshold; each slew rate a pair of levels on
+% one signal. Percent levels are on the amplitude scale of the named
+% signal's own transition (MEASUREMENT_DESIGN.md 5.4).
+G = "gateVoltage@active";
+V = "drainVoltage@active";
+I = "drainCurrent@active";
+on = "turnOn";
+off = "turnOff";
+both = ["turnOn", "turnOff"];
+
+R = add(R, presets(entry("tdOn", 13, "t_d(on)", "Turn-on delay", "Switching timing", "s", on, ...
+    "tdOn", @measureInterval, [ ...
+    interval("IEC8", "IEC-8", "V_GS 10 % to V_DS 90 %", "V_GS 10 % rising to V_DS falling to 90 %", th(G, 0.1, "gate"), th(V, 0.9))
+    interval("IEC9", "IEC-9", "V_GS 10 % to I_D 10 %", "V_GS 10 % rising to I_D rising to 10 %", th(G, 0.1, "gate"), th(I, 0.1))
+    customInterval("tdOn")]), "IEC8", "IEC9"));
+R = add(R, presets(entry("tdOff", 14, "t_d(off)", "Turn-off delay", "Switching timing", "s", off, ...
+    "tdOff", @measureInterval, [ ...
+    interval("IEC8", "IEC-8", "V_GS 90 % to V_DS 10 %", "V_GS 90 % falling to V_DS rising to 10 %", th(G, 0.9, "gate"), th(V, 0.1))
+    interval("IEC9", "IEC-9", "V_GS 90 % to I_D 90 %", "V_GS 90 % falling to I_D falling to 90 %", th(G, 0.9, "gate"), th(I, 0.9))
+    customInterval("tdOff")]), "IEC8", "IEC9"));
+R = add(R, presets(entry("tvf", 15, "t_vf", "Turn-on voltage fall time", "Switching timing", "s", on, ...
+    "tvf", @measureInterval, [ ...
+    interval("IEC8", "IEC-8", "V_DS 90-10 %", "V_DS 90 % to 10 % at turn-on (IEC 60747-8 t_r)", th(V, 0.9), th(V, 0.1))
+    interval("conv8020", "Conv", "V_DS 80-20 %", "V_DS 80 % to 20 % at turn-on", th(V, 0.8), th(V, 0.2))
+    interval("conv9010", "Conv", "V_DS 90-10 %", "V_DS 90 % to 10 % at turn-on, outside IEC 60747-8 (e.g. IGBTs)", th(V, 0.9), th(V, 0.1))
+    customInterval("tvf")]), "IEC8", "conv9010"));
+R = add(R, presets(entry("tvr", 16, "t_vr", "Turn-off voltage rise time", "Switching timing", "s", off, ...
+    "tvr", @measureInterval, [ ...
+    interval("IEC8", "IEC-8", "V_DS 10-90 %", "V_DS 10 % to 90 % at turn-off (IEC 60747-8 t_f)", th(V, 0.1), th(V, 0.9))
+    interval("conv2080", "Conv", "V_DS 20-80 %", "V_DS 20 % to 80 % at turn-off", th(V, 0.2), th(V, 0.8))
+    interval("conv1090", "Conv", "V_DS 10-90 %", "V_DS 10 % to 90 % at turn-off, outside IEC 60747-8 (e.g. IGBTs)", th(V, 0.1), th(V, 0.9))
+    customInterval("tvr")]), "IEC8", "conv1090"));
+R = add(R, presets(entry("tir", 17, "t_ir", "Turn-on current rise time", "Switching timing", "s", on, ...
+    "tir", @measureInterval, [ ...
+    interval("IEC9", "IEC-9", "I_D 10-90 %", "I_D 10 % to 90 % at turn-on (IEC 60747-9 t_r)", th(I, 0.1), th(I, 0.9))
+    interval("conv1090", "Conv", "I_D 10-90 %", "I_D 10 % to 90 % at turn-on, same levels for MOSFETs", th(I, 0.1), th(I, 0.9))
+    customInterval("tir")]), "conv1090", "IEC9"));
+R = add(R, presets(entry("tif", 18, "t_if", "Turn-off current fall time", "Switching timing", "s", off, ...
+    "tif", @measureInterval, [ ...
+    interval("IEC9", "IEC-9", "I_D 90-10 %", "I_D 90 % to 10 % at turn-off (IEC 60747-9 t_f)", th(I, 0.9), th(I, 0.1))
+    interval("conv9010", "Conv", "I_D 90-10 %", "I_D 90 % to 10 % at turn-off, same levels for MOSFETs", th(I, 0.9), th(I, 0.1))
+    customInterval("tif")]), "conv9010", "IEC9"));
+tz = presets(entry("tz", 19, "t_z", "Tail time", "Switching timing", "s", off, ...
+    "tz", @measureInterval, [ ...
+    interval("IEC9", "IEC-9", "I_D 10-2 %", "I_D 10 % to 2 % at turn-off (IGBT tail)", th(I, 0.1), th(I, 0.02))
+    customInterval("tz")]), "IEC9", "IEC9");
+tz.deviceTypes = "IGBT";
+R = add(R, tz);
+R = add(R, presets(entry("tOn", 20, "t_on", "Total turn-on time", "Switching timing", "s", on, ...
+    "tOn", @measureInterval, [ ...
+    interval("IEC8", "IEC-8", "V_GS 10 % to V_DS 10 %", "V_GS 10 % rising to V_DS 10 % (t_d(on) + t_vf)", th(G, 0.1, "gate"), th(V, 0.1))
+    interval("IEC9", "IEC-9", "V_GS 10 % to I_D 90 %", "V_GS 10 % rising to I_D 90 % (t_d(on) + t_ir)", th(G, 0.1, "gate"), th(I, 0.9))
+    customInterval("tOn")]), "IEC8", "IEC9"));
+R = add(R, presets(entry("tOff", 21, "t_off", "Total turn-off time", "Switching timing", "s", off, ...
+    "tOff", @measureInterval, [ ...
+    interval("IEC8", "IEC-8", "V_GS 90 % to V_DS 90 %", "V_GS 90 % falling to V_DS 90 % (t_d(off) + t_vr)", th(G, 0.9, "gate"), th(V, 0.9))
+    interval("IEC9", "IEC-9", "V_GS 90 % to I_D 10 %", "V_GS 90 % falling to I_D 10 % (t_d(off) + t_if)", th(G, 0.9, "gate"), th(I, 0.1))
+    customInterval("tOff")]), "IEC8", "IEC9"));
+R = add(R, presets(entry("tBreak", 22, "t_break", "Pulse break", "Switching timing", "s", "break", ...
+    "tBreak", @measureInterval, [ ...
+    interval("conv", "Conv", "V_GS 50 %", "V_GS 50 % falling (end of pulse k) to V_GS 50 % rising (start of pulse k+1)", ...
+        th(G, 0.5, "gate", 1), th(G, 0.5, "gate", 2))
+    customInterval("tBreak")]), "conv", "conv"));
+R = add(R, presets(entry("deadTime", 23, "T_dt", "Half-bridge dead time", "Switching timing", "s", both, ...
+    "deadTime", @measureDeadTime, [ ...
+    method("conv", "Conv", "V_GS 50 %", ["50 % falling of the outgoing gate to 50 % rising of the " ...
+        "incoming gate. Only when the complementary gate is actively driven"], ...
+        [slot("gate", G), slot("gateN", "gateVoltage@nonActive")])
+    method("custom", "Custom", "user level", "S.measurements.params.custom.deadTime: level and basis", ...
+        [slot("gate", G), slot("gateN", "gateVoltage@nonActive")])]), "conv", "conv"));
+
+%% Slew rates
+R = add(R, slewEntry("dvdt", 24, "dv/dt", "Average drain-voltage slew rate", "V/s", V, "V_DS"));
+R = add(R, slewEntry("didt", 25, "di/dt", "Average drain-current slew rate", "A/s", I, "I_D"));
+R = add(R, slewEntry("dvgsdt", 26, "dV_GS/dt", "Gate-voltage slew rate", "V/s", G, "V_GS"));
+R = add(R, presets(entry("dvdtMax", 27, "dv/dt,max", "Maximum instantaneous dv/dt", "Slew rate", "V/s", both, ...
+    "dvdtMax", @measureSlew, [ ...
+    slewMethod("conv", "Conv", "max |dv/dt| in 10-90 %", ["maximum |dV_DS/dt| between the 10 % and 90 % " ...
+        "crossings; Savitzky-Golay derivative, window from the steepest band"], V, [0.1 0.9], "maxDerivative")
+    slewMethod("custom", "Custom", "max |dv/dt| in user levels", "levels from S.measurements.params.custom.dvdtMax", ...
+        V, [], "maxDerivative")]), "conv", "conv"));
+R = add(R, presets(entry("didtMax", 28, "di/dt,max", "Maximum instantaneous di/dt", "Slew rate", "A/s", both, ...
+    "didtMax", @measureSlew, [ ...
+    slewMethod("conv", "Conv", "max |di/dt| in 10-90 %", ["maximum |dI_D/dt| between the 10 % and 90 % " ...
+        "crossings; Savitzky-Golay derivative, window from the steepest band"], I, [0.1 0.9], "maxDerivative")
+    slewMethod("custom", "Custom", "max |di/dt| in user levels", "levels from S.measurements.params.custom.didtMax", ...
+        I, [], "maxDerivative")]), "conv", "conv"));
+end
+
+function e = slewEntry(id, row, symbol, name, unit, role, label)
+e = presets(entry(id, row, symbol, name, "Slew rate", unit, ["turnOn", "turnOff"], id, @measureSlew, [ ...
+    slewMethod("avg1090", "Conv", label + " 10-90 % average", "average slope between the 10 % and 90 % crossings", role, [0.1 0.9], "average")
+    slewMethod("avg2080", "Conv", label + " 20-80 % average", "average slope between the 20 % and 80 % crossings", role, [0.2 0.8], "average")
+    slewMethod("bandMax", "Custom", "max over band", ["steepest average slope over any band of " ...
+        "S.measurements.params.slew.band of the swing within 10-90 % (Q10)"], role, [0.1 0.9], "bandMax")
+    slewMethod("custom", "Custom", "user levels", "average slope between the levels in S.measurements.params.custom." + id, ...
+        role, [], "average")]), "avg1090", "avg1090");
+end
+
+function s = th(signal, level, basis, edge)
+% Threshold of a declarative method (resolveThreshold).
+if nargin < 3
+    basis = "transition";
+end
+if nargin < 4
+    edge = 1;
+end
+s = struct('signal', string(signal), 'level', level, 'basis', string(basis), 'edge', edge);
+end
+
+function m = interval(id, standard, label, description, start, stop)
+m = method(id, standard, label, description, slotsFor([start, stop]));
+m.params = struct('start', start, 'stop', stop);
+end
+
+function m = customInterval(id)
+m = method("custom", "Custom", "user thresholds", ...
+    "start and stop thresholds from S.measurements.params.custom." + id, ...
+    slot("gate", "gateVoltage@active"));
+m.params = struct('customKey', string(id));
+end
+
+function m = slewMethod(id, standard, label, description, role, levels, kind)
+m = method(id, standard, label, description, slotsFor(th(role, 0)));
+m.params = struct('signal', string(role), 'levels', levels, 'kind', string(kind));
+end
+
+function slots = slotsFor(specs)
+% One requirement slot per distinct signal role of the thresholds.
+roles = unique([specs.signal], 'stable');
+slots = slot();
+for r = roles
+    slots(end+1) = slot(replace(r, "@", "_"), r); %#ok<AGROW>
+end
+end
+
+function e = presets(e, iec8, iec9)
+% Method used by the IEC-8 and IEC-9 presets.
+e.presets = struct('IEC8', string(iec8), 'IEC9', string(iec9));
 end
 
 % =====================================================================
@@ -170,6 +318,7 @@ e.deviceTypes = strings(1, 0);
 e.methodKey = string(methodKey);
 e.methods = methods(:)';
 e.fn = fn;
+e.presets = struct();      % set with presets(): method per IEC preset
 end
 
 function m = method(id, standard, label, description, requires, nominal)
@@ -187,6 +336,7 @@ m.description = strjoin(string(description), "");   % parts may be split for lin
 m.requires = requires;
 m.nominal = string(nominal);
 m.busModel = false;
+m.params = struct();       % declarative definition (thresholds, levels)
 end
 
 function m = busModel(m)

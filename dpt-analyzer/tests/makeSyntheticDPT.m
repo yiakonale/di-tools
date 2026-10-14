@@ -23,7 +23,9 @@ function truth = makeSyntheticDPT(folder, opts)
 %   Ron, vf0, vfSlope, tauGate, tauSwitch, tdOn, tdOff, clampLevel, Cdc,
 %   channels (string array of signals to write), idGain, idOffset
 %   (sensor error on Id-LS), idClip (sensor saturation), idInvert,
-%   ilOffset, vdsHSOffset (probe zero offsets of Iout and Vds-HS).
+%   ilOffset, vdsHSOffset (probe zero offsets of Iout and Vds-HS),
+%   deadTime (of the complementary HS gate, written when "Vgs-HS" is in
+%   channels).
 
 if nargin < 2
     opts = struct();
@@ -40,6 +42,14 @@ for k = 1:numel(o.ons)
         (1 - tanh((t - offs(k) - o.tdOff) / o.tauSwitch));
 end
 vgs = -5 + 23 * gate;
+% Complementary HS gate (synchronous mode): on outside the LS pulses
+% widened by the dead time on both sides.
+hsOn = ones(size(t));
+for k = 1:numel(o.ons)
+    hsOn = hsOn - 0.25 * (1 + tanh((t - o.ons(k) + o.deadTime) / o.tauGate)) .* ...
+        (1 - tanh((t - offs(k) - o.deadTime) / o.tauGate));
+end
+vgsHS = -5 + 23 * hsOn;
 vdc = o.vdc + o.vdcSlope * t;
 
 IL = zeros(size(t));
@@ -72,9 +82,9 @@ if o.idInvert
     idSensor = -idSensor;
 end
 
-signals = struct('name', {"Vgs-LS", "Vds-LS", "Id-LS", "Iout", "Vdc", "Vds-HS", "Vds-LS-clamp"}, ...
-    'data', {vgs, vdsLS, idSensor, IL + o.ilOffset, vdc, vdsHS + o.vdsHSOffset, min(vdsLS, o.clampLevel)}, ...
-    'units', {'V', 'V', 'A', 'A', 'V', 'V', 'V'});
+signals = struct('name', {"Vgs-LS", "Vds-LS", "Id-LS", "Iout", "Vdc", "Vds-HS", "Vds-LS-clamp", "Vgs-HS"}, ...
+    'data', {vgs, vdsLS, idSensor, IL + o.ilOffset, vdc, vdsHS + o.vdsHSOffset, min(vdsLS, o.clampLevel), vgsHS}, ...
+    'units', {'V', 'V', 'A', 'A', 'V', 'V', 'V', 'V'});
 if ~isfolder(folder)
     mkdir(folder);
 end
@@ -140,6 +150,7 @@ d.idInvert = false;
 d.Cdc = [];
 d.ilOffset = 0;               % probe zero offset of Iout [A]
 d.vdsHSOffset = 0;            % probe zero offset of Vds-HS [V]
+d.deadTime = 100e-9;          % complementary HS gate (channel "Vgs-HS", if listed)
 for f = string(fieldnames(d))'
     if ~isfield(o, f)
         o.(f) = d.(f);

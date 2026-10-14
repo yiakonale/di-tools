@@ -14,8 +14,9 @@ function g = gateInstant(ctx, e, p, S)
 %   reference crossing (e.smoothingSamples, S.detection.timingSmoothing),
 %   so gate-referenced measurement instants get the same noise immunity.
 %   The search runs from the event window's start to the end of the
-%   qualified edge; the last crossing in the edge's direction is used,
-%   as in detection.
+%   qualified edge, last crossing in the edge's direction (as in
+%   detection); a level beyond the far hysteresis arm is searched after
+%   the edge, to the window end, first crossing.
 %
 %   Output struct: found, time [s, corrected], level [V], basis,
 %   smoothingSamples, reason ("" when found).
@@ -37,10 +38,24 @@ end
 
 n = e.smoothingSamples;
 pad = (n - 1) / 2 * ctx.col.sampleInterval;
-search = [e.window(1), e.core(2)];
+% A level beyond the far hysteresis arm (e.g. 90 % on a rising edge, as
+% the arm is at 85 %) is only reached after the qualified edge: search
+% from the end of the edge to the end of the window, first crossing.
+% Otherwise the crossing lies within [window start, end of edge]: last
+% crossing, as in detection.
+arms = ctx.ev.thresholds;
+beyond = (e.direction == "rising" && level > arms.armHigh) || ...
+    (e.direction == "falling" && level < arms.armLow);
+if beyond
+    search = [e.core(2), e.window(2)];
+    occurrence = "first";
+else
+    search = [e.window(1), e.core(2)];
+    occurrence = "last";
+end
 sig = getSignal(ctx.col, ctx.ev.signal, search + [-pad, pad], S);
 x = filterSignal(sig.x, "movmean", n);
-c = findCrossing(sig.t, x, level, e.direction, search, "last");
+c = findCrossing(sig.t, x, level, e.direction, search, occurrence);
 
 g.found = c.found;
 g.time = c.time;

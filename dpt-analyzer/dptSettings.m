@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.8.0";
+S.schemaVersion = "0.9.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -381,6 +381,17 @@ S.measurements.common.gateBasis = "swing";
 S.measurements.normalization.maxResidualRatio = 2;
 S.measurements.normalization.maxGainSpread = 0.02;
 
+% Preset: sets every measurement whose preference below is "preset" to
+% the method of the chosen standard (MEASUREMENT_DESIGN.md section 4).
+%   "auto" : IEC-8 for cfg.deviceType "MOSFET", IEC-9 for "IGBT"
+%   "IEC-8": IEC 60747-8 (MOSFET) + IEC 60747-2 (diode)
+%   "IEC-9": IEC 60747-9 (IGBT) + IEC 60747-2 (diode)
+%   "none" : each measurement's first registry method
+% Rows without an IEC definition use their default conventional method.
+% A method from the other device type's standard is flagged
+% "methodDeviceMismatch" on the result.
+S.measurements.preset = "auto";
+
 % Optional measurements (#48-55) run only when listed here ("all" = all).
 S.measurements.enableOptional = strings(1, 0);
 
@@ -395,6 +406,23 @@ S.measurements.methods.onStateWindow = "finalPortion";   % #49-51, #54 device
 S.measurements.methods.RonEff        = "averaged";
 S.measurements.methods.IfDiode       = ["inductorDuringBreak", "measuredDiode"];
 S.measurements.methods.Vf            = ["breakWindow", "busModel"];
+% Timing and slew rates (#13-28): "preset", or explicit method ids.
+S.measurements.methods.tdOn          = "preset";
+S.measurements.methods.tdOff         = "preset";
+S.measurements.methods.tvf           = "preset";
+S.measurements.methods.tvr           = "preset";
+S.measurements.methods.tir           = "preset";
+S.measurements.methods.tif           = "preset";
+S.measurements.methods.tz            = "preset";
+S.measurements.methods.tOn           = "preset";
+S.measurements.methods.tOff          = "preset";
+S.measurements.methods.tBreak        = "preset";
+S.measurements.methods.deadTime      = "preset";
+S.measurements.methods.dvdt          = "preset";
+S.measurements.methods.didt          = "preset";
+S.measurements.methods.dvgsdt        = "preset";
+S.measurements.methods.dvdtMax       = "preset";
+S.measurements.methods.didtMax       = "preset";
 
 % Method parameters.
 % onStateWindow "delayToEnd": delay after V_DS reaches 10 % at turn-on
@@ -408,6 +436,52 @@ S.measurements.params.RonEff.delays = [];
 % Extra delay [s] after the turn-off ringing settles before the diode
 % forward window of #52-54 starts.
 S.measurements.params.breakWindow.delay = 0;
+
+% Slew rates (#24-26): band maximum (Q10). The steepest average slope over
+% any band of this fraction of the swing, slid across [10 %, 90 %] in
+% steps of bandStep.
+S.measurements.params.slew.band = 0.2;
+S.measurements.params.slew.bandStep = 0.01;
+
+% Maximum instantaneous slew rate (#27, #28): Savitzky-Golay derivative
+% (order 2). Window = windowBandFactor x the time the signal takes to
+% cross the steepest band above, at least minSamples (odd; 3 with order 2
+% is a plain central difference). If the floor sets the window, the edge
+% is under-sampled for a derivative and the result is flagged
+% "derivativeUndersampled". On synthetic
+% tanh edges quantized like the example (2.8 V steps), one band time
+% gives n = 5 / 13 / 51 for tau = 2 / 5 / 20 ns, each within about 2 % of
+% the true maximum; no fixed window works for all three (n = 11: -3 %,
+% +1 %, +18 %). windowDuration [s] overrides with a fixed window.
+S.measurements.params.derivative.order = 2;
+S.measurements.params.derivative.windowBandFactor = 1;
+S.measurements.params.derivative.minSamples = 3;
+S.measurements.params.derivative.windowDuration = [];
+
+% [Custom] definitions, used when a measurement's method is "custom".
+%   Intervals (#13-22): struct('start', thr, 'stop', thr), where a
+%     threshold is struct('signal', role, 'level', p, 'basis', b) with
+%     basis "transition" (amplitude scale of the signal's own levels),
+%     "Vdc" (p * V_DC), "gate" (gate basis) or "absolute" [V or A];
+%     optional 'edge' (1 or 2, for break events).
+%   Slew rates (#24-28): [lo hi] fractions of the swing.
+%   Dead time (#23): struct('level', p or volts, 'basis', "swing"|"absolute").
+S.measurements.params.custom.tdOn      = [];
+S.measurements.params.custom.tdOff     = [];
+S.measurements.params.custom.tvf       = [];
+S.measurements.params.custom.tvr       = [];
+S.measurements.params.custom.tir       = [];
+S.measurements.params.custom.tif       = [];
+S.measurements.params.custom.tz        = [];
+S.measurements.params.custom.tOn       = [];
+S.measurements.params.custom.tOff      = [];
+S.measurements.params.custom.tBreak    = [];
+S.measurements.params.custom.deadTime  = [];
+S.measurements.params.custom.dvdt      = [];
+S.measurements.params.custom.didt      = [];
+S.measurements.params.custom.dvgsdt    = [];
+S.measurements.params.custom.dvdtMax   = [];
+S.measurements.params.custom.didtMax   = [];
 
 %% Reporting ----------------------------------------------------------
 % Warnings are always collected in the results. This controls whether
@@ -626,6 +700,18 @@ if ~isempty(d) && ~(isnumeric(d) && isvector(d) && all(isfinite(d)) && all(d >= 
     fail('measurements.params.RonEff.delays', 'must be [] or a vector of delays >= 0 [s].');
 end
 mustBeNonnegativeScalar(M.params.breakWindow.delay, 'measurements.params.breakWindow.delay');
+mustBeOption(M.preset, ["auto", "IEC-8", "IEC-9", "none"], 'measurements.preset');
+if ~(M.params.slew.band > 0 && M.params.slew.band <= 0.8)
+    fail('measurements.params.slew.band', 'must lie in (0, 0.8].');
+end
+mustBePositiveScalar(M.params.slew.bandStep, 'measurements.params.slew.bandStep');
+mustBePositiveInteger(M.params.derivative.order, 'measurements.params.derivative.order');
+mustBePositiveScalar(M.params.derivative.windowBandFactor, 'measurements.params.derivative.windowBandFactor');
+mustBePositiveInteger(M.params.derivative.minSamples, 'measurements.params.derivative.minSamples');
+if M.params.derivative.minSamples <= M.params.derivative.order
+    fail('measurements.params.derivative.minSamples', 'must exceed the derivative order.');
+end
+mustBeEmptyOrPositiveScalar(M.params.derivative.windowDuration, 'measurements.params.derivative.windowDuration');
 
 % Reporting
 mustBeLogicalScalar(S.report.echoWarnings, 'report.echoWarnings');
