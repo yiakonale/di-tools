@@ -91,6 +91,11 @@ if m.nominal ~= "" && isempty(cfg.nominal.(m.nominal))
     missing = "cfg.nominal." + m.nominal;
     return
 end
+if m.requiresCfg ~= "" && isempty(cfg.(m.requiresCfg))
+    ok = false;
+    missing = "cfg." + m.requiresCfg;
+    return
+end
 if m.busModel && col.busVoltage.source == "none"
     ok = false;
     missing = "a bus-voltage source (Vdc channel, a V_DS before the first pulse, or cfg.nominal.busVoltage)";
@@ -114,18 +119,23 @@ ok = true;
 end
 
 function prefs = expandPreset(prefs, def, cfg, S)
-% Replace "preset" by the registry's method for the active standard.
+% Replace "preset" by the registry's method for the active standard,
+% followed by every other registry method as a fallback (capability
+% driven: attempt whatever the collection supports). "custom" and
+% "nominal" need user input, so they are used only when listed.
 k = find(prefs == "preset");
 if isempty(k)
     return
 end
 preset = presetName(cfg, S);
-if preset == "none" || ~isfield(def.presets, erase(preset, "-"))
-    id = def.methods(1).id;
+ids = [def.methods.id];
+fallback = ids(~ismember(ids, ["custom", "nominal"]));
+if preset ~= "none" && isfield(def.presets, erase(preset, "-"))
+    first = def.presets.(erase(preset, "-"));
 else
-    id = def.presets.(erase(preset, "-"));
+    first = fallback(1);
 end
-prefs = unique([prefs(1:k-1), id, prefs(k+1:end)], 'stable');
+prefs = unique([prefs(1:k-1), first, fallback, prefs(k+1:end)], 'stable');
 end
 
 function p = presetName(cfg, S)

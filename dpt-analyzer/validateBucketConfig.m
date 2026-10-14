@@ -16,6 +16,7 @@ function cfg = validateBucketConfig(cfg, S, baseDir)
 %     cfg.circuit.Cdc                        [] (DC-link capacitance [F])
 %     cfg.circuit.CdcTolerance               0.2 (its tolerance, fraction)
 %     cfg.zeroOffsetCorrection.enable        false
+%     cfg.switchingFrequency                 [] (application f_s [Hz], for P_sw)
 
 arguments
     cfg (1,1) struct
@@ -24,7 +25,8 @@ arguments
 end
 
 checkFields(cfg, ["bucketPath", "activeDevice", "deviceType", "expectedPulseCount", "gate"], ...
-    "cfg", ["nominal", "currentNormalization", "circuit", "zeroOffsetCorrection"]);
+    "cfg", ["nominal", "currentNormalization", "circuit", "zeroOffsetCorrection", ...
+    "switchingFrequency"]);
 checkFields(cfg.gate, "nominal", "cfg.gate");
 checkFields(cfg.gate.nominal, ["high", "low"], "cfg.gate.nominal");
 
@@ -146,6 +148,17 @@ if ~(isnumeric(v) && isscalar(v) && isreal(v) && v >= 0 && v < 1)
     error('dpt:config:invalidValue', 'cfg.circuit.CdcTolerance must be a fraction in [0, 1).');
 end
 cfg.circuit.CdcTolerance = double(v);
+
+% Switching frequency of the application (optional), for the average
+% switching loss P_sw = f_s * E_sw (#12)
+if ~isfield(cfg, 'switchingFrequency')
+    cfg.switchingFrequency = [];
+end
+v = cfg.switchingFrequency;
+if ~isempty(v) && ~(isnumeric(v) && isscalar(v) && isreal(v) && isfinite(v) && v > 0)
+    error('dpt:config:invalidValue', 'cfg.switchingFrequency must be [] or a positive frequency [Hz].');
+end
+cfg.switchingFrequency = double(v);
 
 % Zero-offset correction from the pre-pulse segment (optional, opt-in)
 if ~isfield(cfg, 'zeroOffsetCorrection')

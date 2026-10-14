@@ -13,6 +13,8 @@ function truth = makeSyntheticDPT(folder, opts)
 %     Id-LS               s * I_L (no reverse recovery)
 %     Vds-LS              (1 - s) * (V_DC + V_F) + s * Ron * I_L
 %     Vds-HS              s * (V_DC - Ron * I_L) - (1 - s) * V_F
+%     Id-HS               -(1 - s) * I_L (freewheel current, positive
+%                         drain -> source), if listed in channels
 %     Vdc                 V_DC(t) = vdc + vdcSlope * t   (bus droop), or,
 %                         if opts.Cdc is set, vdc - Q(t)/Cdc with Q the
 %                         charge drawn by the LS device (capacitor droop)
@@ -82,9 +84,10 @@ if o.idInvert
     idSensor = -idSensor;
 end
 
-signals = struct('name', {"Vgs-LS", "Vds-LS", "Id-LS", "Iout", "Vdc", "Vds-HS", "Vds-LS-clamp", "Vgs-HS"}, ...
-    'data', {vgs, vdsLS, idSensor, IL + o.ilOffset, vdc, vdsHS + o.vdsHSOffset, min(vdsLS, o.clampLevel), vgsHS}, ...
-    'units', {'V', 'V', 'A', 'A', 'V', 'V', 'V', 'V'});
+signals = struct('name', {"Vgs-LS", "Vds-LS", "Id-LS", "Iout", "Vdc", "Vds-HS", "Vds-LS-clamp", "Vgs-HS", "Id-HS"}, ...
+    'data', {vgs, vdsLS, idSensor, IL + o.ilOffset, vdc, vdsHS + o.vdsHSOffset, min(vdsLS, o.clampLevel), vgsHS, ...
+    -(1 - s) .* IL}, ...
+    'units', {'V', 'V', 'A', 'A', 'V', 'V', 'V', 'V', 'A'});
 if ~isfolder(folder)
     mkdir(folder);
 end

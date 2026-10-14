@@ -9,9 +9,11 @@ function ctx = eventContext(col, c, ev, al, tl, edgeIds, kind, cfg)
 %     ev       its gate events (detectGateTransitions)
 %     al, tl   alignment and timeline
 %     edgeIds  universal edge ids: one for "turnOn"/"turnOff" events; two
-%              for "pulse" (turn-on, turn-off) and "break" (turn-off of
-%              pulse k, turn-on of pulse k+1)
-%     kind     "turnOn" | "turnOff" | "pulse" | "break"
+%              for "pulse" (turn-on, turn-off), and for "break" and "pair"
+%              (turn-off of pulse k, turn-on of pulse k+1). A "pair" is the
+%              same operating point switched off and on again (E_sw, P_sw);
+%              a "break" is the time between them (t_break, V_F, I_F).
+%     kind     "turnOn" | "turnOff" | "pulse" | "break" | "pair"
 %     cfg      bucket configuration
 %
 %   Output ctx: kind, collection, c, col, ev, cfg, offset, edgeIds,
@@ -32,7 +34,7 @@ arguments
     al (1,1) struct
     tl (1,1) struct
     edgeIds (1,:) double
-    kind (1,1) string {mustBeMember(kind, ["turnOn", "turnOff", "pulse", "break"])}
+    kind (1,1) string {mustBeMember(kind, ["turnOn", "turnOff", "pulse", "break", "pair"])}
     cfg (1,1) struct
 end
 

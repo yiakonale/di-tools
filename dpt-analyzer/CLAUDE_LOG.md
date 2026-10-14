@@ -11,7 +11,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | 5a–5c done; **5d in review** (2026-10-15); 5e–5h to go |
+| 5 | Measurement specification & registry | 5a–5d done; **5e in review** (2026-10-15); 5f–5h to go |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -27,9 +27,9 @@ _Last session ended 2026-10-15. Every step is committed locally._
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing` (38 + 31 + 33 + 39 + 25 + 20 + 34 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy` (38 + 31 + 33 + 39 + 25 + 20 + 34 + 21 cases, plus the settings checks).
 
-**Next step (pick up here): Batch 5e**, switching energy and power (#5–12). It builds on 5d's declarative thresholds (`resolveThreshold`: bases transition, Vdc, gate, absolute) and on the bus model (#8 E_io). 5d is implemented and awaiting review (design §13). The bus-voltage plan below is kept for reference.
+**Next step (pick up here): Batch 5f**, voltage, current and gate stress (#29–38). Reference levels come from the bus model (#30/#31 reference V_DC,off) and the operating point (#33/#34 reference I_on). Peaks are searched in the territory. #37/#38 (non-active gate cross-talk) are measurable on the example (+1.8 / −8.0 V). Ratings come from new optional `cfg.ratings`. 5e is implemented and awaiting review (design §14). The bus-voltage plan below is kept for reference.
 
 _Done 2026-10-15:_
 1. **Config:** `cfg.circuit.Cdc` [F] and `cfg.circuit.CdcTolerance` (default 0.2). Settings: a V_DC source preference list (busChannel, kvl, chargeDroop, constant).
@@ -52,6 +52,7 @@ _Done 2026-10-15:_
 - **`S.alignment.maxResidual` is unset.** Only one bucket, with one collection, exists so far. Calibrate it once a real multi-collection bucket exists: its residuals will show the real shot-to-shot gate jitter.
 - **Possible extension: relative V_DS probe gain.** Vds-LS before pulse 1 and Vds-HS during pulse 1's on-state both measure about V_DC and differ by about 0.7 %. This could be calibrated like the current sensors. Not requested.
 - **Example normalization offset:** b = +0.75 A remains after zero correction. It is below a fifth of one Iout ADC step and so unresolvable; noted only.
+- **E_io at the pulse-10 turn-on** is about 2.5 mJ below its trend (pair ratio E_io / E_sw 1.009 against 1.07–1.12 elsewhere). E_io is a small difference of two ~140 mJ integrals, so it is sensitive to probe gain mismatch at the 1 % level; the 0.7 % V_DS probe difference accounts for about 1 mJ. Worth a look at that waveform; it supports doing the relative V_DS gain calibration.
 
 **Working agreements:**
 - Commit locally after every step. Stage only `dpt-analyzer/` paths: the parent `di/` repo has unrelated modified `.mlx` files.
@@ -87,12 +88,34 @@ _Done 2026-10-15:_
 | `measurements/measureBusVoltage.m`, `measureSwitchingCurrent.m`, `measureConduction.m` | Implementations of #1–2, #3–4 and #49–54. |
 | `measurements/eventLevels.m`, `resolveThreshold.m` | Level model (the signal's own pre/post levels at the gate instant) and declarative threshold resolution (5d). |
 | `measurements/measureInterval.m`, `measureSlew.m`, `measureDeadTime.m` | Timing #13–22, slew rates #24–28, dead time #23. |
+| `measurements/measureEnergy.m` | Switching energy and power #5–12 (windows, method sets, E_io, composites). |
 | `tests/makeSyntheticDPT.m` | Synthetic phase-leg generator with known truth, for measurement tests. |
 | `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`. |
 | `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
-| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`); formalized in Batch 7. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`, `test_energy`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-15 — Batch 5e: switching energy and power
+
+- **User confirmed both 5d review points:** percent levels come from the named signal's own levels, and the band-time derivative window.
+- **Implemented #5–12:**
+  - E_on / E_off: IEC-8, IEC-9, two conventional pairs, a fixed-time window, custom. Each method belongs to a **method set**.
+  - E_sw: same-set pairs only.
+  - E_io per event and across a pair, with V_DC from the bus model held before the edge.
+  - E_sw,N direct and indirect.
+  - P_on / P_off: average and peak.
+  - P_sw: needs the new optional `cfg.switchingFrequency`.
+  - The `"pair"` event kind (turn-off k + turn-on k+1).
+  - Settings 0.10.0.
+- **Preset fallback widened:** `"preset"` now means the preset's method, then every other non-custom registry method, so E_sw,N falls back to its indirect method when Id-HS is not captured.
+- **Synthetic generator:** an `Id-HS` channel (−(1 − s)·I_L).
+- **Findings on the example:**
+  - E_on 3.3 → 14.6 mJ and E_off 5.3 → 18.2 mJ over the train.
+  - E_io / E_sw is 1.07–1.12 per pair, except 1.009 for pair 9–10.
+  - E_io is a small difference of two ~140 mJ integrals, so it is sensitive to 1 % probe gain errors.
+  - Iout clipping was suspected and ruled out (freewheel plateau).
+- **Verified:** `tests/test_energy.m` passes 21 cases (synthetic truth and analytic E, method sets, fixed-window refusal, composites, P_sw skip, example consistency). All suites pass.
 
 ### 2026-10-15 — Batch 5d: timing, slew rates, presets
 

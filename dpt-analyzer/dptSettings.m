@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.9.0";
+S.schemaVersion = "0.10.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -423,6 +423,17 @@ S.measurements.methods.didt          = "preset";
 S.measurements.methods.dvgsdt        = "preset";
 S.measurements.methods.dvdtMax       = "preset";
 S.measurements.methods.didtMax       = "preset";
+% Switching energy and power (#5-12): "preset", or explicit method ids.
+% E_sw, P_on and P_off follow the E_on / E_off methods chosen here.
+S.measurements.methods.Eon           = "preset";
+S.measurements.methods.Eoff          = "preset";
+S.measurements.methods.Esw           = "preset";
+S.measurements.methods.Eio           = "preset";
+S.measurements.methods.EioPair       = "preset";
+S.measurements.methods.EswNonActive  = "preset";
+S.measurements.methods.Pon           = "preset";
+S.measurements.methods.Poff          = "preset";
+S.measurements.methods.Psw           = "preset";
 
 % Method parameters.
 % onStateWindow "delayToEnd": delay after V_DS reaches 10 % at turn-on
@@ -482,6 +493,18 @@ S.measurements.params.custom.didt      = [];
 S.measurements.params.custom.dvgsdt    = [];
 S.measurements.params.custom.dvdtMax   = [];
 S.measurements.params.custom.didtMax   = [];
+% Energies (#5, #6): struct('start', thr, 'stop', thr), as for intervals.
+S.measurements.params.custom.Eon       = [];
+S.measurements.params.custom.Eoff      = [];
+
+% Energy windows "[Conv] V_GS 10 % / 90 % -> fixed time" (#5, #6): length
+% [s]. The spec gives 10 to 20 us; the window must fit in the territory,
+% otherwise the result fails (it would integrate into the next event).
+S.measurements.params.energy.fixedDuration = 10e-6;
+
+% E_io (#8): the window ends this long [s] after the active V_DS has
+% settled (settlingBand of its transition).
+S.measurements.params.Eio.settleDelay = 0;
 
 %% Reporting ----------------------------------------------------------
 % Warnings are always collected in the results. This controls whether
@@ -712,6 +735,8 @@ if M.params.derivative.minSamples <= M.params.derivative.order
     fail('measurements.params.derivative.minSamples', 'must exceed the derivative order.');
 end
 mustBeEmptyOrPositiveScalar(M.params.derivative.windowDuration, 'measurements.params.derivative.windowDuration');
+mustBePositiveScalar(M.params.energy.fixedDuration, 'measurements.params.energy.fixedDuration');
+mustBeNonnegativeScalar(M.params.Eio.settleDelay, 'measurements.params.Eio.settleDelay');
 
 % Reporting
 mustBeLogicalScalar(S.report.echoWarnings, 'report.echoWarnings');

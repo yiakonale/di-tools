@@ -4,8 +4,9 @@ function R = measurementRegistry()
 %   R = measurementRegistry() returns a struct array with one entry per
 %   measurement (MEASUREMENT_DESIGN.md section 3). Row numbers refer to
 %   MEASUREMENT_SPEC.md. Entries are added group by group (Batch 5c-5h);
-%   this version holds the operating point (#1-4), timing (#13-23), slew
-%   rates (#24-28) and conduction (#49-54).
+%   this version holds the operating point (#1-4), switching energy and
+%   power (#5-12), timing (#13-23), slew rates (#24-28) and conduction
+%   (#49-54).
 %
 %   Entry fields
 %     id, row, symbol, name, category, unit
@@ -147,6 +148,9 @@ R = add(R, entry("PcondDiode", 54, "P_cond,F", "Conduction power (diode)", "Cond
 %% Timing (#13-23) and slew rates (#24-28) ----------------------------------
 R = addTimingAndSlew(R);
 
+%% Switching energy and power (#5-12) ------------------------------------------
+R = addEnergy(R);
+
 end
 
 % =====================================================================
@@ -239,6 +243,99 @@ R = add(R, presets(entry("didtMax", 28, "di/dt,max", "Maximum instantaneous di/d
         "crossings; Savitzky-Golay derivative, window from the steepest band"], I, [0.1 0.9], "maxDerivative")
     slewMethod("custom", "Custom", "max |di/dt| in user levels", "levels from S.measurements.params.custom.didtMax", ...
         I, [], "maxDerivative")]), "conv", "conv"));
+end
+
+function R = addEnergy(R)
+% E_on / E_off: integral of V_DS * I_D between two declared thresholds.
+% Each method belongs to a method SET; E_sw (#7) combines E_on and E_off
+% of the same set only (MEASUREMENT_SPEC.md row 7).
+G = "gateVoltage@active";
+V = "drainVoltage@active";
+I = "drainCurrent@active";
+VI = [slot("V", V), slot("I", I)];
+both = ["turnOn", "turnOff"];
+
+R = add(R, presets(entry("Eon", 5, "E_on", "Turn-on energy", "Switching energy", "J", "turnOn", ...
+    "Eon", @measureEnergy, [ ...
+    energyMethod("IEC8", "IEC-8", "I_D 10 % to V_DS 10 %", th(I, 0.1), th(V, 0.1), "IEC8")
+    energyMethod("IEC9", "IEC-9", "V_GS 10 % to V_DS 2 % of V_DC", th(G, 0.1, "gate"), th(V, 0.02, "Vdc"), "IEC9")
+    energyMethod("convI10V2", "Conv", "I_D 10 % to V_DS 2 % of V_DC", th(I, 0.1), th(V, 0.02, "Vdc"), "convV2")
+    energyMethod("convI10V10", "Conv", "I_D 10 % to V_DS 10 % of V_DC", th(I, 0.1), th(V, 0.1, "Vdc"), "convV10")
+    energyMethod("fixed", "Conv", "V_GS 10 % to fixed time", th(G, 0.1, "gate"), [], "fixed")
+    energyMethod("custom", "Custom", "user thresholds", [], [], "custom")]), "IEC8", "IEC9"));
+R = add(R, presets(entry("Eoff", 6, "E_off", "Turn-off energy", "Switching energy", "J", "turnOff", ...
+    "Eoff", @measureEnergy, [ ...
+    energyMethod("IEC8", "IEC-8", "V_DS 10 % to I_D 10 %", th(V, 0.1), th(I, 0.1), "IEC8")
+    energyMethod("IEC9", "IEC-9", "V_GS 90 % to I_D 2 %", th(G, 0.9, "gate"), th(I, 0.02), "IEC9")
+    energyMethod("convV10I2", "Conv", "V_DS 10 % of V_DC to I_D 2 %", th(V, 0.1, "Vdc"), th(I, 0.02), "convV2")
+    energyMethod("convV10I10", "Conv", "V_DS 10 % of V_DC to I_D 10 %", th(V, 0.1, "Vdc"), th(I, 0.1), "convV10")
+    energyMethod("fixed", "Conv", "V_GS 90 % to fixed time", th(G, 0.9, "gate"), [], "fixed")
+    energyMethod("custom", "Custom", "user thresholds", [], [], "custom")]), "IEC8", "IEC9"));
+
+R = add(R, entry("Esw", 7, "E_sw", "Total switching energy", "Switching energy", "J", "pair", ...
+    "Esw", @measureEnergy, method("sum", "Conv", "E_on + E_off", ...
+    ["E_off of pulse k + E_on of pulse k+1 (same operating point), both from the " ...
+     "methods selected for #5 and #6, which must belong to the same method set"], VI)));
+
+ioSlots = [slot("I", I), slot("IL", "outputCurrent"), slot("VN", "drainVoltage@nonActive"), slot("gate", G)];
+R = add(R, entry("Eio", 8, "E_io", "Phase-leg switching energy", "Switching energy", "J", both, ...
+    "Eio", @measureEnergy, busModel(method("perEvent", "Conv", "energy balance per event", ...
+    ["integral of V_DC * I_D,active - I_L * V_DS,non-active (Zhang et al., IEEE TPEL 2017) " ...
+     "from the gate instant until the active V_DS has settled (+ S.measurements.params." ...
+     "Eio.settleDelay). V_DC from the bus model, held at its value before the edge. " ...
+     "Includes both devices' losses and cross-talk; insensitive to V-I deskew"], ioSlots))));
+R = add(R, entry("EioPair", 8, "E_io,pair", "Phase-leg switching energy across both events", ...
+    "Switching energy", "J", "pair", "EioPair", @measureEnergy, busModel(method("acrossBoth", "Conv", ...
+    "energy balance across both events", ["the same integral from the turn-off gate instant of " ...
+     "pulse k to the settled turn-on of pulse k+1. Also contains the freewheel diode's " ...
+     "conduction energy during the break"], ioSlots))));
+
+R = add(R, entry("EswNonActive", 9, "E_sw,N", "Non-active device switching energy", ...
+    "Switching energy", "J", both, "EswNonActive", @measureEnergy, [ ...
+    method("direct", "Conv", "direct V_DS,N * I_D,N", ["integral of V_DS * I_D of the " ...
+        "non-active device over the active device's E_on / E_off window (needs a second " ...
+        "current sensor, which adds loop inductance)"], ...
+        [VI, slot("VN", "drainVoltage@nonActive"), slot("IN", "drainCurrent@nonActive")])
+    busModel(method("indirect", "Conv", "indirect E_io - E_on/E_off", ...
+        "E_io of the event minus the active device's E_on / E_off", [VI, ioSlots]))]));
+
+R = add(R, entry("Pon", 10, "P_on", "Turn-on switching power", "Switching energy", "W", "turnOn", ...
+    "Pon", @measureEnergy, [ ...
+    method("average", "Conv", "E_on / window", "E_on divided by the length of its window (method of #5)", VI)
+    method("peak", "Conv", "peak V_DS*I_D", "maximum of V_DS * I_D inside the E_on window", VI)]));
+R = add(R, entry("Poff", 11, "P_off", "Turn-off switching power", "Switching energy", "W", "turnOff", ...
+    "Poff", @measureEnergy, [ ...
+    method("average", "Conv", "E_off / window", "E_off divided by the length of its window (method of #6)", VI)
+    method("peak", "Conv", "peak V_DS*I_D", "maximum of V_DS * I_D inside the E_off window", VI)]));
+psw = method("perSwitch", "Conv", "f_s * (E_on + E_off)", ...
+    "cfg.switchingFrequency times E_sw (#7) of the pair, per switch", VI);
+psw.requiresCfg = "switchingFrequency";
+R = add(R, entry("Psw", 12, "P_sw", "Average switching loss", "Switching energy", "W", "pair", ...
+    "Psw", @measureEnergy, psw));
+end
+
+function m = energyMethod(id, standard, label, start, stop, set)
+% Energy window between two thresholds; stop = [] means a fixed duration
+% after the start; start = [] means a custom definition.
+V = "drainVoltage@active";
+I = "drainCurrent@active";
+slots = [slot("V", V), slot("I", I)];
+specs = [start, stop];
+if ~isempty(specs) && any([specs.signal] == "gateVoltage@active")
+    slots(end+1) = slot("gate", "gateVoltage@active");
+end
+if isempty(start)
+    description = "start and stop thresholds from S.measurements.params.custom";
+elseif isempty(stop)
+    description = "from the gate threshold for S.measurements.params.energy.fixedDuration";
+else
+    description = "integral of V_DS * I_D from " + label;
+end
+m = method(id, standard, label, description, slots);
+m.params = struct('start', start, 'stop', stop, 'set', string(set));
+if ~isempty(specs) && any([specs.basis] == "Vdc")
+    m = busModel(m);
+end
 end
 
 function e = slewEntry(id, row, symbol, name, unit, role, label)
@@ -337,6 +434,7 @@ m.requires = requires;
 m.nominal = string(nominal);
 m.busModel = false;
 m.params = struct();       % declarative definition (thresholds, levels)
+m.requiresCfg = "";        % top-level cfg field the method needs, e.g. "switchingFrequency"
 end
 
 function m = busModel(m)

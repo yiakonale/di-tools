@@ -667,3 +667,70 @@ Slew rates on the same set:
 - **t_on = t_d(on) + t_vf and t_off = t_d(off) + t_vr hold exactly** on every pulse, because the IEC-8 end points are shared.
 - Average ≤ band maximum ≤ instantaneous maximum on every turn-on.
 - The HS gate is not driven, so the dead time is skipped.
+
+## 14. Batch 5e: switching energy and power (2026-10-15)
+
+### 14.1 E_on / E_off and method sets
+
+E_on and E_off (#5/#6) are ∫ V_DS·I_D dt between two declarative thresholds, or from a gate threshold for a fixed duration, or between custom thresholds. Integration limits fall between samples and are interpolated (`integrateBetween`).
+
+Every method belongs to a **method set**. E_sw (#7) combines E_off of pulse k with E_on of pulse k+1 only if both come from the same set; otherwise it fails with the reason ("different method sets").
+
+| Set | E_on | E_off |
+|---|---|---|
+| IEC8 | I_D 10 % → V_DS 10 % | V_DS 10 % → I_D 10 % |
+| IEC9 | V_GS 10 % → V_DS 2 % of V_DC | V_GS 90 % → I_D 2 % |
+| convV2 | I_D 10 % → V_DS 2 % of V_DC | V_DS 10 % of V_DC → I_D 2 % |
+| convV10 | I_D 10 % → V_DS 10 % of V_DC | V_DS 10 % of V_DC → I_D 10 % |
+| fixed | V_GS 10 % + `fixedDuration` | V_GS 90 % + `fixedDuration` |
+| custom | Thresholds from settings | Thresholds from settings |
+
+**Fixed windows.** The default `fixedDuration` is 10 µs, the spec's lower bound. A window that runs past the territory fails with the reason, because it would integrate into the next event. On the example the territory after a turn-on is 3.2 µs.
+
+### 14.2 The other rows
+
+**E_io (#8)** is ∫(V_DC·I_D − I_L·V_DS,N) dt.
+
+- **Window:** from the gate instant until the non-active device's V_DS has settled, plus `params.Eio.settleDelay`.
+- **V_DC:** from the bus model, **held** at its value over the averaging window before the edge, as the formula assumes a DC bus. The tag states the source.
+- **EioPair** spans both events of a pair, so it also contains the freewheel diode's conduction energy during the break.
+
+**E_sw,N (#9):**
+
+- **direct:** ∫ V_DS,N·I_D,N over the active E_on/E_off window. It needs the non-active I_D.
+- **indirect:** E_io − E_on/E_off.
+
+**P_on / P_off (#10/#11):** E divided by its window length, or the peak V_DS·I_D in the window. The tag names the energy method it used.
+
+**P_sw (#12):** `cfg.switchingFrequency` (new optional bucket field) × E_sw. The phase-leg variant adds f_s·E_rr and comes with reverse recovery in 5g.
+
+### 14.3 Preset fallback (refines §13.3)
+
+A `"preset"` preference now expands to the preset's method first, then **every other registry method** in order, so whatever the collection supports is attempted. `custom` and `nominal` are excluded because they need user input. A fallback from the other standard stays visible through its tag and the `methodDeviceMismatch` flag.
+
+The first version used the first method only, so E_sw,N never tried its indirect method.
+
+### 14.4 [data] Results and an E_io observation
+
+**Synthetic** (one tanh for V and I):
+
+- E_on and E_off match 0.4·V₀·I·τs within 2 % (48.1 µJ against 48.0 µJ).
+- E_io, E_sw,N, the P_on peak (V₀·I/4) and P_sw match their truth.
+- Mixed method sets are refused; the 10 µs fixed window is refused as running past the territory.
+
+**Example, IEC-8:**
+
+| Quantity | Pulse 3 | Pulse 9 |
+|---|---|---|
+| E_on | 3.28 mJ | 13.36 mJ |
+| E_off | 5.30 mJ | 17.01 mJ |
+
+- E_on grows monotonically over pulses 2–10.
+- E_sw = E_off(k) + E_on(k+1) exactly.
+- The pulse-1 zero-current E_on is refused by IEC-8 (its current threshold is below the noise floor). IEC-9 gives 220 µJ there, essentially output-capacitance energy.
+
+**E_io against E_sw.** At pair level, (E_io,off + E_io,on) / E_sw is 1.07–1.12 on pairs 1–8, which is the HS device's own losses. On pair 9–10 it is only 1.009: E_io of the pulse-10 turn-on is about 2.5 mJ below its trend (13.66 mJ against E_on = 14.61 mJ).
+
+**Why E_io is fragile.** It is a **small difference of two large integrals**: at pulse 10, 150.5 mJ − 136.9 mJ. A 1 % relative error between the probes therefore moves it by about 1.4 mJ. The measured 0.7 % gain difference between the two V_DS probes (§12.3) alone accounts for about 1 mJ. This makes the V_DS-probe relative-gain calibration more than cosmetic. The pulse-10 deviation is logged as an open observation.
+
+Checked and ruled out: Iout clipping. Its 1375 samples at the 638 A maximum are the freewheel plateau after the last pulse, not saturation.
