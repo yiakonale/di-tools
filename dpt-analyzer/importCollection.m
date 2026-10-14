@@ -179,6 +179,9 @@ col.unmappedFiles = unmapped;
 col.normalization = struct('applied', false, 'reference', "", 'adjusted', "", ...
     'gain', 1, 'offset', 0, 'residualRms', NaN, 'expectedRms', NaN, ...
     'pulseGains', [], 'gainSpread', NaN, 'nPulses', 0, 'reason', "not run");
+% Outcome of the opt-in zero-offset correction (zeroOffsetCorrection).
+col.zeroOffset = struct('applied', false, 'signals', strings(1, 0), ...
+    'offsets', zeros(1, 0), 'reason', "not run");
 % Bus-voltage model V_DC(t); filled in by busVoltageModel after the
 % timeline is built.
 col.busVoltage = struct('source', "none", 'label', "none", 'description', "not run", ...
@@ -244,7 +247,8 @@ c.deskew = entry.deskew;
 c.deskewApplied = n * dt;
 c.shift = n;
 c.invert = entry.invert;
-% Current-sensor normalization (normalizeCurrentSensors) sets these.
+% Set later by zeroOffsetCorrection and normalizeCurrentSensors.
+c.zeroOffset = 0;
 c.gain = 1;
 c.offset = 0;
 

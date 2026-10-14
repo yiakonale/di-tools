@@ -15,6 +15,7 @@ function cfg = validateBucketConfig(cfg, S, baseDir)
 %     cfg.currentNormalization.reference     "Iout" ("Iout" | "Id")
 %     cfg.circuit.Cdc                        [] (DC-link capacitance [F])
 %     cfg.circuit.CdcTolerance               0.2 (its tolerance, fraction)
+%     cfg.zeroOffsetCorrection.enable        false
 
 arguments
     cfg (1,1) struct
@@ -23,7 +24,7 @@ arguments
 end
 
 checkFields(cfg, ["bucketPath", "activeDevice", "deviceType", "expectedPulseCount", "gate"], ...
-    "cfg", ["nominal", "currentNormalization", "circuit"]);
+    "cfg", ["nominal", "currentNormalization", "circuit", "zeroOffsetCorrection"]);
 checkFields(cfg.gate, "nominal", "cfg.gate");
 checkFields(cfg.gate.nominal, ["high", "low"], "cfg.gate.nominal");
 
@@ -145,6 +146,18 @@ if ~(isnumeric(v) && isscalar(v) && isreal(v) && v >= 0 && v < 1)
     error('dpt:config:invalidValue', 'cfg.circuit.CdcTolerance must be a fraction in [0, 1).');
 end
 cfg.circuit.CdcTolerance = double(v);
+
+% Zero-offset correction from the pre-pulse segment (optional, opt-in)
+if ~isfield(cfg, 'zeroOffsetCorrection')
+    cfg.zeroOffsetCorrection = struct();
+end
+checkFields(cfg.zeroOffsetCorrection, strings(1, 0), "cfg.zeroOffsetCorrection", "enable");
+if ~isfield(cfg.zeroOffsetCorrection, 'enable')
+    cfg.zeroOffsetCorrection.enable = false;
+end
+if ~(islogical(cfg.zeroOffsetCorrection.enable) && isscalar(cfg.zeroOffsetCorrection.enable))
+    error('dpt:config:invalidValue', 'cfg.zeroOffsetCorrection.enable must be true or false.');
+end
 
 end
 

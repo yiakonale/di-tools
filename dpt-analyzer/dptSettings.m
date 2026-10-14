@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.7.0";
+S.schemaVersion = "0.8.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -257,6 +257,23 @@ S.corrections.nonIntegerDeskew = "round";
 % Floating-point tolerance [samples] for deciding that deskew/dt is
 % already an integer (e.g. 1.28 ns / 160 ps = 8 +/- 1e-15).
 S.corrections.integerShiftTol = 1e-6;
+
+%% Zero-offset correction (cfg.zeroOffsetCorrection) ---------------------
+% Before the first pulse of a DPT the inductor is at rest and both devices
+% are off; the inductor DC-shorts the non-active device. Channels playing
+% these roles must then read zero, so their pre-pulse mean is a probe
+% zero offset, removed as a declared correction (getSignal). The active
+% V_DS reads V_DC there and is never zero-corrected.
+S.zeroOffset.roles = ["drainCurrent@active", "drainCurrent@nonActive", ...
+    "outputCurrent", "drainVoltage@nonActive", "drainVoltageClamped@nonActive"];
+% An "offset" larger than this fraction of the channel's scale is a real
+% signal (e.g. a record that starts inside a pulse train), not an offset:
+% that channel is left uncorrected and reported. Scale: the channel's
+% peak for currents, the pre-pulse V_DS of the active device (V_DC) for
+% voltages. Probe offsets do not shrink with the test current (the
+% example's -4.8 A is 0.8 % of its 638 A peak but would be 2.7 % of a
+% 180 A test), so the limit only catches gross cases.
+S.zeroOffset.maxFraction = 0.05;
 
 %% DC bus voltage model -------------------------------------------------
 % V_DC(t) is estimated once per collection from the first available
@@ -535,6 +552,12 @@ mustBeEmptyOrPositiveScalar(S.alignment.maxResidual, 'alignment.maxResidual');
 % Sampling
 mustBePositiveScalar(S.sampling.sampleIntervalRelTol, 'sampling.sampleIntervalRelTol');
 mustBePositiveScalar(S.sampling.timeVectorRelTol, 'sampling.timeVectorRelTol');
+
+% Zero-offset correction
+if ~isstring(S.zeroOffset.roles) || isempty(S.zeroOffset.roles)
+    fail('zeroOffset.roles', 'must be a non-empty string array of signal roles.');
+end
+mustBeFraction(S.zeroOffset.maxFraction, 'zeroOffset.maxFraction');
 
 % Bus voltage model
 src = S.busVoltage.sources;

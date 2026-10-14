@@ -22,7 +22,8 @@ function truth = makeSyntheticDPT(folder, opts)
 %   OPTS fields (all optional): dt, span, ons, width, vdc, vdcSlope, L,
 %   Ron, vf0, vfSlope, tauGate, tauSwitch, tdOn, tdOff, clampLevel, Cdc,
 %   channels (string array of signals to write), idGain, idOffset
-%   (sensor error on Id-LS), idClip (sensor saturation), idInvert.
+%   (sensor error on Id-LS), idClip (sensor saturation), idInvert,
+%   ilOffset, vdsHSOffset (probe zero offsets of Iout and Vds-HS).
 
 if nargin < 2
     opts = struct();
@@ -72,7 +73,7 @@ if o.idInvert
 end
 
 signals = struct('name', {"Vgs-LS", "Vds-LS", "Id-LS", "Iout", "Vdc", "Vds-HS", "Vds-LS-clamp"}, ...
-    'data', {vgs, vdsLS, idSensor, IL, vdc, vdsHS, min(vdsLS, o.clampLevel)}, ...
+    'data', {vgs, vdsLS, idSensor, IL + o.ilOffset, vdc, vdsHS + o.vdsHSOffset, min(vdsLS, o.clampLevel)}, ...
     'units', {'V', 'V', 'A', 'A', 'V', 'V', 'V'});
 if ~isfolder(folder)
     mkdir(folder);
@@ -137,6 +138,8 @@ d.idOffset = 0;
 d.idClip = [];
 d.idInvert = false;
 d.Cdc = [];
+d.ilOffset = 0;               % probe zero offset of Iout [A]
+d.vdsHSOffset = 0;            % probe zero offset of Vds-HS [V]
 for f = string(fieldnames(d))'
     if ~isfield(o, f)
         o.(f) = d.(f);

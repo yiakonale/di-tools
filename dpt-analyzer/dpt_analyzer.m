@@ -32,6 +32,12 @@ cfg.gate.nominal.low   = -5;               % [V] active gate off-state drive
 % cfg.nominal.busVoltage  = 400;            % [V]
 % cfg.nominal.testCurrent = 500;            % [A]
 
+% Optional: remove probe zero offsets. Before the first pulse the currents
+% and the non-active device's V_DS must read zero (inductor at rest), so
+% their mean there is an offset and is subtracted. Needs a record that
+% starts at rest.
+cfg.zeroOffsetCorrection.enable = true;
+
 % Optional: calibrate the I_D and Iout sensors against each other on the
 % on-state of every pulse, taking one of them as the truth.
 cfg.currentNormalization.enable    = false;
@@ -88,6 +94,14 @@ if S.report.verbosity ~= "quiet"
         fprintf('  %-16s %s\n', '', strjoin([col.channels.signal], ", "));
         fprintf('  %-16s gate %s: levels %.3g / %.3g V, %d edges, offset %.6g us\n', '', ...
             ev.signal, ev.levels.low, ev.levels.high, height(ev.edges), result.al.offset(k) * 1e6);
+        zo = col.zeroOffset;
+        if zo.applied
+            parts = compose("%s %+.3g", zo.signals(:), zo.offsets(:));
+            fprintf('  %-16s zero offsets removed: %s\n', '', strjoin(parts, ", "));
+        end
+        if cfg.zeroOffsetCorrection.enable && zo.reason ~= ""
+            fprintf('  %-16s zero offsets: %s\n', '', zo.reason);
+        end
         nz = col.normalization;
         if nz.applied
             fprintf('  %-16s currents normalized to %s: %s x %.5g %+.3g A\n', '', ...

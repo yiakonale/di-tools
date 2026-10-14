@@ -16,8 +16,9 @@ function sig = getSignal(col, signal, tRange, S)
 %
 %   Output fields
 %     signal, channel, units
-%     x            corrected samples: inverted if requested, then
-%                  gain * x + offset from current-sensor normalization
+%     x            corrected samples: inverted if requested, minus the
+%                  zero offset (zeroOffsetCorrection), then gain * x +
+%                  offset from current-sensor normalization
 %     t            corrected times, col.time(index) + deskewApplied [s]
 %     index        raw sample indices into the channel's data
 %     complete     false if tRange extends beyond the corrected record
@@ -67,6 +68,9 @@ end
 x = ch.data(index);
 if c.invert
     x = -x;
+end
+if c.zeroOffset ~= 0
+    x = x - c.zeroOffset;               % probe zero offset (pre-pulse mean)
 end
 if c.gain ~= 1 || c.offset ~= 0
     x = c.gain * x + c.offset;          % current-sensor normalization

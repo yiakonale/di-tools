@@ -8,8 +8,8 @@ function result = runPipeline(cfg, S)
 %     4. import and validate each collection
 %     5. detect the active gate's transitions in each collection
 %     6. align the collections and build the pulse timeline, then per
-%        collection: current-sensor normalization (opt-in) and the
-%        bus-voltage model V_DC(t)
+%        collection: zero-offset correction (opt-in), current-sensor
+%        normalization (opt-in) and the bus-voltage model V_DC(t)
 %
 %   A collection that fails steps 4-6 is excluded and reported; the
 %   others continue. The run aborts only if no collection remains.
@@ -91,6 +91,12 @@ evs = evs(al.sourceIndex);
 
 tl = buildPulseTimeline(evs, al, cfg, S);
 issues = [issues; tl.issues];
+
+%% 6a. Zero-offset correction (opt-in: cfg.zeroOffsetCorrection)
+for k = 1:numel(collections)
+    [collections(k), iss] = zeroOffsetCorrection(collections(k), k, al, tl, cfg, S);
+    issues = [issues; iss]; %#ok<AGROW>
+end
 
 %% 6b. Current-sensor normalization (opt-in: cfg.currentNormalization)
 for k = 1:numel(collections)
