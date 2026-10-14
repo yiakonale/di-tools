@@ -21,7 +21,13 @@ _Last session ended 2026-10-15. Every step is committed locally._
 
 **State:**
 - Batches 1–4 are done.
-- In Batch 5: 5a (design), 5b (primitives) and 5c (normalization, operating point #1–4, conduction #49–54, and the bus-voltage model V_DC(t)) are implemented and tested.
+- In Batch 5, all implemented and tested:
+  - 5a: design;
+  - 5b: primitives;
+  - 5c: normalization, operating point #1–4, conduction #49–54, bus-voltage model V_DC(t), zero-offset correction, bucket-measured C;
+  - 5d: timing #13–23, slew rates #24–28, IEC presets (confirmed by the user 2026-10-15);
+  - 5e: switching energy and power #5–12. **Awaiting the user's review.** The open observation on the pulse-10 E_io is in the open points.
+- Remaining in Batch 5: 5f stress (#29–38), 5g reverse recovery (#39–46, plus P_sw phase-leg and #45 E_rr), 5h parasitics (#47, #48, #55).
 - `dpt_analyzer.m` only configures and calls `runPipeline(cfg, S)`, which runs workflow steps 3–6c: import → detection → alignment → timeline → zero-offset correction (opt-in, **on** in the example) → current normalization (opt-in) → bus-voltage model, using C measured in the bucket where possible. The summary states the offsets removed and the V_DC source per collection.
 - Measurements are implemented and tested but **not yet run by the entry script**; that is Batch 6 (`runMeasurements`).
 
