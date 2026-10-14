@@ -14,7 +14,8 @@ function results = evaluateMeasurement(def, ctx, S)
 %        the entry has no methodKey). The first method whose requirement
 %        slots are all satisfied IN THIS COLLECTION is used: each slot
 %        takes its first alternative present in the collection. "nominal"
-%        methods also need their cfg.nominal value.
+%        methods also need their cfg.nominal value; bus-model methods need
+%        a bus-voltage model (col.busVoltage, busVoltageModel).
 %     4. If none is available, the result is "skipped" and the reason
 %        lists what each preferred method was missing.
 
@@ -53,7 +54,7 @@ present = [ctx.col.channels.signal];
 why = strings(1, 0);
 for id = prefs
     m = def.methods(known == id);
-    [ok, sig, missing] = available(m, present, cfg, S);
+    [ok, sig, missing] = available(m, present, ctx.col, cfg, S);
     if ok
         results = def.fn(def, m, ctx, sig, S);
         for k = 1:numel(results)
@@ -68,13 +69,18 @@ results = skipped(def, ctx, "no method available in this collection: " + strjoin
 end
 
 % =====================================================================
-function [ok, sig, missing] = available(m, present, cfg, S)
+function [ok, sig, missing] = available(m, present, col, cfg, S)
 % Resolve every requirement slot to the first alternative present.
 sig = struct();
 missing = "";
 if m.nominal ~= "" && isempty(cfg.nominal.(m.nominal))
     ok = false;
     missing = "cfg.nominal." + m.nominal;
+    return
+end
+if m.busModel && col.busVoltage.source == "none"
+    ok = false;
+    missing = "a bus-voltage source (Vdc channel, a V_DS before the first pulse, or cfg.nominal.busVoltage)";
     return
 end
 for s = m.requires

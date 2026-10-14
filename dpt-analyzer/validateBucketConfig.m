@@ -13,6 +13,8 @@ function cfg = validateBucketConfig(cfg, S, baseDir)
 %     cfg.nominal.busVoltage / .testCurrent  [] ([Custom] references)
 %     cfg.currentNormalization.enable        false
 %     cfg.currentNormalization.reference     "Iout" ("Iout" | "Id")
+%     cfg.circuit.Cdc                        [] (DC-link capacitance [F])
+%     cfg.circuit.CdcTolerance               0.2 (its tolerance, fraction)
 
 arguments
     cfg (1,1) struct
@@ -21,7 +23,7 @@ arguments
 end
 
 checkFields(cfg, ["bucketPath", "activeDevice", "deviceType", "expectedPulseCount", "gate"], ...
-    "cfg", ["nominal", "currentNormalization"]);
+    "cfg", ["nominal", "currentNormalization", "circuit"]);
 checkFields(cfg.gate, "nominal", "cfg.gate");
 checkFields(cfg.gate.nominal, ["high", "low"], "cfg.gate.nominal");
 
@@ -120,6 +122,29 @@ if ~any(cfg.currentNormalization.reference == ["Iout", "Id"])
     error('dpt:config:invalidValue', ...
         'cfg.currentNormalization.reference must be "Iout" or "Id".');
 end
+
+% DC link (optional): capacitance and its tolerance, for the
+% charge-droop bus-voltage model (MEASUREMENT_DESIGN.md section 12)
+if ~isfield(cfg, 'circuit')
+    cfg.circuit = struct();
+end
+checkFields(cfg.circuit, strings(1, 0), "cfg.circuit", ["Cdc", "CdcTolerance"]);
+if ~isfield(cfg.circuit, 'Cdc')
+    cfg.circuit.Cdc = [];
+end
+if ~isfield(cfg.circuit, 'CdcTolerance')
+    cfg.circuit.CdcTolerance = 0.2;
+end
+v = cfg.circuit.Cdc;
+if ~isempty(v) && ~(isnumeric(v) && isscalar(v) && isreal(v) && isfinite(v) && v > 0)
+    error('dpt:config:invalidValue', 'cfg.circuit.Cdc must be [] or a positive capacitance [F].');
+end
+cfg.circuit.Cdc = double(v);
+v = cfg.circuit.CdcTolerance;
+if ~(isnumeric(v) && isscalar(v) && isreal(v) && v >= 0 && v < 1)
+    error('dpt:config:invalidValue', 'cfg.circuit.CdcTolerance must be a fraction in [0, 1).');
+end
+cfg.circuit.CdcTolerance = double(v);
 
 end
 

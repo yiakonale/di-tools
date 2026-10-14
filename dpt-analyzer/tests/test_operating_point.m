@@ -39,6 +39,7 @@ def = @(id) R([R.id] == id);
         al = alignCollections(ev, Sx);
         tl = buildPulseTimeline(ev, al, cfg, Sx);
         col = normalizeCurrentSensors(col, 1, al, tl, cfg, Sx);
+        col = busVoltageModel(col, 1, al, tl, cfg, Sx);
     end
     function r = run(id, col, ev, al, tl, cfg, edgeIds, kind, Sx)
         if nargin < 9, Sx = S; end
@@ -79,10 +80,10 @@ check(any(r1.flags == "belowNoiseFloor") || abs(r1.value) < 1e-6, 'first turn-on
 
 % #1/#2 from the bus channel (preferred when mapped).
 r = run("VdcOff", col, ev, al, tl, cfg, 4, "turnOff");
-check(r.methodId == "busChannel" && abs(r.value - truthAt(tr, tr.vdc, tr.g90(2) - 0.5 * ctx.edges(1).D)) < 1e-3, ...
+check(r.methodId == "model" && contains(r.methodTag, "bus channel") && abs(r.value - truthAt(tr, tr.vdc, tr.g90(2) - 0.5 * ctx.edges(1).D)) < 1e-3, ...
     sprintf('V_DC,off from the bus channel: %s', formatResult(r)));
 r = run("VdcOn", col, ev, al, tl, cfg, 3, "turnOn");
-check(r.methodId == "busChannel", sprintf('V_DC,on from the bus channel: %s', formatResult(r)));
+check(r.methodId == "model" && contains(r.methodTag, "bus channel"), sprintf('V_DC,on from the bus channel: %s', formatResult(r)));
 
 % V_DS-based fallbacks read V_DC + V_F.
 Sv = dptSettings(struct('report', base.report, 'measurements', struct('enableOptional', "all", ...
@@ -146,11 +147,13 @@ r = run("Ion", colB, evB, alB, tlB, cfgB, 3, "turnOn");
 check(r.methodId == "extrapolatedId" && abs(r.value - truthAt(trB, trB.IL, trB.g10(2))) < 1, ...
     sprintf('no Iout: I_on falls back to extrapolated I_D: %s', formatResult(r)));
 r = run("VdcOff", colB, evB, alB, tlB, cfgB, 4, "turnOff");
-check(r.methodId == "settledVds", 'no Vdc channel: V_DC,off from settled V_DS');
+check(r.methodId == "model" && contains(r.methodTag, "constant"), ...
+    sprintf('no Vdc channel, one V_DS, no C: V_DC(t) constant: %s', formatResult(r)));
 r = run("VdsOn", colB, evB, alB, tlB, cfgB, [3 4], "pulse");
 check(r.provenance.signals.V == "Vds-LS", 'no clamp channel: full-range V_DS used');
 r = run("Vf", colB, evB, alB, tlB, cfgB, [4 5], "break");
-check(r.status == "skipped" && contains(r.reason, "Vds-HS"), sprintf('V_F skipped without the non-active V_DS: %s', r.reason));
+check(r.methodId == "busModel" && any(r.flags == "modelBased"), ...
+    sprintf('no non-active V_DS: V_F falls back to V_DS - V_DC(t): %s', formatResult(r)));
 
 %% Current-sensor normalization ----------------------------------------------------
 fN = fullfile(root, 'bucketN', 'N');

@@ -13,12 +13,14 @@ function truth = makeSyntheticDPT(folder, opts)
 %     Id-LS               s * I_L (no reverse recovery)
 %     Vds-LS              (1 - s) * (V_DC + V_F) + s * Ron * I_L
 %     Vds-HS              s * (V_DC - Ron * I_L) - (1 - s) * V_F
-%     Vdc                 V_DC(t) = vdc + vdcSlope * t   (bus droop)
+%     Vdc                 V_DC(t) = vdc + vdcSlope * t   (bus droop), or,
+%                         if opts.Cdc is set, vdc - Q(t)/Cdc with Q the
+%                         charge drawn by the LS device (capacitor droop)
 %     Vds-LS-clamp        min(Vds-LS, clampLevel)
 %     V_F                 vf0 + vfSlope * I_L
 %
 %   OPTS fields (all optional): dt, span, ons, width, vdc, vdcSlope, L,
-%   Ron, vf0, vfSlope, tauGate, tauSwitch, tdOn, tdOff, clampLevel,
+%   Ron, vf0, vfSlope, tauGate, tauSwitch, tdOn, tdOff, clampLevel, Cdc,
 %   channels (string array of signals to write), idGain, idOffset
 %   (sensor error on Id-LS), idClip (sensor saturation), idInvert.
 
@@ -40,12 +42,23 @@ vgs = -5 + 23 * gate;
 vdc = o.vdc + o.vdcSlope * t;
 
 IL = zeros(size(t));
+Q = 0;
+% The diode conducts above 1 mA, so the femtoamp tails of the smooth
+% switch model cannot switch on a full V_F before the first pulse.
+iOn = 1e-3;
+if ~isempty(o.Cdc)
+    vdc(:) = o.vdc;                             % capacitor droop replaces the slope
+end
 for k = 2:numel(t)
+    if ~isempty(o.Cdc)
+        Q = Q + s(k-1) * IL(k-1) * o.dt;        % charge drawn from the link
+        vdc(k) = o.vdc - Q / o.Cdc;
+    end
     vf = o.vf0 + o.vfSlope * IL(k-1);
-    dI = (s(k-1) * (vdc(k-1) - o.Ron * IL(k-1)) - (1 - s(k-1)) * vf * (IL(k-1) > 0)) / o.L;
+    dI = (s(k-1) * (vdc(k-1) - o.Ron * IL(k-1)) - (1 - s(k-1)) * vf * (IL(k-1) > iOn)) / o.L;
     IL(k) = max(IL(k-1) + dI * o.dt, 0);
 end
-vf = (o.vf0 + o.vfSlope * IL) .* (IL > 0);
+vf = (o.vf0 + o.vfSlope * IL) .* (IL > iOn);
 id = s .* IL;
 vdsLS = (1 - s) .* (vdc + vf) + s .* o.Ron .* IL;
 vdsHS = s .* (vdc - o.Ron * IL) - (1 - s) .* vf;
@@ -123,6 +136,7 @@ d.idGain = 1;
 d.idOffset = 0;
 d.idClip = [];
 d.idInvert = false;
+d.Cdc = [];
 for f = string(fieldnames(d))'
     if ~isfield(o, f)
         o.(f) = d.(f);

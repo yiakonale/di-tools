@@ -428,7 +428,7 @@ IEC methods are tagged with the standard name. All others carry their class and 
 
 A power inherits its voltage's resolution flag. **[data]** Every on-state voltage on the example's full-range channel is flagged: V_DS(on) is at most 1–2 V against a 2.8 V step.
 
-## 12. Bus-voltage model V_DC(t) (approved 2026-10-14, NOT yet implemented)
+## 12. Bus-voltage model V_DC(t) (approved 2026-10-14, implemented 2026-10-15)
 
 **Problem.** A separate bus-voltage channel is rarely captured because scopes are channel-limited, and a small DC link droops during the pulse train.
 
@@ -468,3 +468,48 @@ The spec's per-event options ("settled off-state V_DS", "off-state V_DS before t
 ### 12.3 Related open point
 
 **The full-range V_DS probes disagree by about 1 %.** On the example, Vds-HS reads −2.8 V before pulse 1 where the true value is 0 V, and the three V_DC readings around pulse 1 (pre-pulse V_DS, on-state KVL, break KVL) differ by 3–4 V. Any V_DS-based V_DC is therefore absolute only to about 1 %, the same size as V_F. A possible later opt-in: zero-offset correction of the non-active V_DS from the pre-pulse segment, where it must read 0.
+
+### 12.4 Implementation notes (2026-10-15)
+
+**Files.**
+
+| File | Role |
+|---|---|
+| `busVoltageModel.m` | Pipeline step 6c, after normalization: selects the source and runs the diagnostics. |
+| `measurements/busVoltageAt.m` | The only way measurements read V_DC. |
+| `measurements/chargeAt.m` | Q(t). |
+
+**Settings 0.7.0.**
+
+- `S.busVoltage.sources` sets the order.
+- `S.busVoltage.nominalTolerance` (5 %) bounds the pre-pulse V_DS vs `cfg.nominal` check.
+- `S.busVoltage.prePulseCurrentFraction` (2 %) is explained in the pre-pulse current check below.
+- `cfg.circuit.Cdc` and `cfg.circuit.CdcTolerance` (default 0.2) are new bucket fields.
+
+**Charge intervals depend on the current signal.**
+
+- **I_D:** from the turn-on window start to the turn-off window end. I_D is zero outside conduction, so a wider interval cannot add charge, and it cannot miss a slow fall or tail.
+- **Iout (when no I_D is mapped):** stops at the gate-edge cores, because after the turn-off it carries the freewheel current, which does not drain the link.
+
+**Uncertainty is conservative.** Droop = Q/C, so the worst case over C·(1 ± tol) is C·(1 − tol), an error of droop·tol/(1 − tol). That is 25 % of the droop for tol = 20 %. On the synthetic set, with C configured 20 % high, the error is 4.43 V against 5.54 V reported.
+
+**Pre-pulse current check.** It requires more than the noise floor **and** more than 2 % of the record's peak current. The example's Iout reads −4.8 A before pulse 1 (probe zero offset, against a 638 A peak) and is not a pre-charge.
+
+**The C estimate scales with the current sensor.** It comes from the measured droop against Q, where available:
+
+- example with normalized currents: 0.680 mF;
+- example with uncorrected Id, which reads 6.9 % low: 0.637 mF.
+
+The issue message says which sensor the charge came from.
+
+**#1/#2.** The separate `busChannel` method is replaced by `model`, whose first source is the bus channel. The model's source is appended to the tag, e.g. `[Conv: V_DC(t) from KVL]`, and its flags and uncertainty are carried over. `settledVds`/`offStateVds` (V_DC + V_F) stay selectable.
+
+**#52.** New fallback `busModel`: V_F = active off-state V_DS − V_DC(t), flagged `modelBased`. On a drooping record with a constant V_DC0 it gives an impossible negative V_F (−1.84 V on the synthetic set), flagged `busDroopDetected`.
+
+**[data] Example results.**
+
+| Configuration | Source | V_DC at the last turn-off |
+|---|---|---|
+| Both V_DS | KVL (V_DC0 = 403.0 V) | 372.4 V |
+| Single-V_DS copy, C = 0.685 mF | charge droop | 374.1 V |
+| Single-V_DS copy, no C | constant | droop of at least 21.7 V detected, results flagged |

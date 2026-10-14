@@ -4,9 +4,12 @@ function r = measureBusVoltage(def, method, ctx, sig, S)
 %   r = measureBusVoltage(def, method, ctx, sig, S) implements the
 %   methods of registry entries VdcOff and VdcOn:
 %
-%     busChannel   mean of the bus-voltage channel over averagingWindow*D
-%                  ending at the gate instant (V_GS 90 % falling at
-%                  turn-off, 10 % rising at turn-on)
+%     model        the bus-voltage model V_DC(t) (busVoltageModel,
+%                  busVoltageAt) averaged over averagingWindow*D ending at
+%                  the gate instant (V_GS 90 % falling at turn-off, 10 %
+%                  rising at turn-on). The model's source (bus channel,
+%                  KVL, charge droop, constant) is appended to the tag, and
+%                  its uncertainty and flags are carried over.
 %     offStateVds  (#2) the same window on the active device's V_DS, which
 %                  is off during the pulse break
 %     settledVds   (#1) mean of V_DS after the turn-off ringing has
@@ -17,7 +20,8 @@ function r = measureBusVoltage(def, method, ctx, sig, S)
 %
 %   With the freewheel diode conducting, the off-state V_DS of the active
 %   device is V_DC + V_F of that diode, so the V_DS-based methods read
-%   high by V_F; the bus channel does not.
+%   high by V_F; the model does not (its constant V_DC0 comes from before
+%   the first pulse, when no diode conducts).
 
 r = makeResult(def, method, ctx);
 e = ctx.edges(1);
@@ -30,7 +34,30 @@ switch method.id
         r.provenance.source = "cfg.nominal.busVoltage";
         return
 
-    case {"busChannel", "offStateVds"}
+    case "model"
+        p = 0.9 * (e.kind == "turnOff") + 0.1 * (e.kind == "turnOn");
+        g = gateInstant(ctx, e, p, S);
+        if ~g.found
+            r.reason = g.reason;
+            return
+        end
+        range = [g.time - C.averagingWindow * e.D, g.time];
+        bv = busVoltageAt(ctx.col, range, S);
+        if isnan(bv.value)
+            r.reason = "the bus-voltage model gives no value over the averaging window";
+            return
+        end
+        r.value = bv.value;
+        r.methodTag = r.methodTag + " from " + bv.label;
+        r.flags = bv.flags;
+        r.provenance.busVoltage = bv.description;
+        r.provenance.uncertainty = bv.uncertainty;
+        r.provenance.gateInstant = g.time - e.time;
+        r.provenance.window = range - e.time;
+        r.status = "ok";
+        return
+
+    case "offStateVds"
         p = 0.9 * (e.kind == "turnOff") + 0.1 * (e.kind == "turnOn");
         g = gateInstant(ctx, e, p, S);
         if ~g.found

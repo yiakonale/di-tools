@@ -16,6 +16,10 @@ function results = measureConduction(def, method, ctx, sig, S)
 %     custom        S.measurements.params.onStateWindow.custom, relative
 %                   to the turn-off gate instant
 %
+%   V_F (#52) is -V_DS of the non-active device, or, when that is not
+%   captured, the active device's off-state V_DS minus the bus-voltage
+%   model V_DC(t) (method "busModel", flagged "modelBased").
+%
 %   Diode window (break events: turn-off of pulse k, turn-on of k+1):
 %   from the settling of the non-active device's V_DS after the turn-off
 %   (+ S.measurements.params.breakWindow.delay) to the next turn-on gate
@@ -93,7 +97,17 @@ switch def.id
         r = ratioResult(r, ctx, sig, range, S);
     case "Vf"
         st = windowStats(ctx, sig.V, range, S);
-        r = levelResult(r, st, -st.mean, S, true);
+        if method.id == "busModel"
+            % Active off-state V_DS = V_DC + V_F.
+            bv = busVoltageAt(ctx.col, range, S);
+            r = levelResult(r, st, st.mean - bv.value, S, true);
+            r.methodTag = r.methodTag + " from " + bv.label;
+            r.flags = unique([r.flags, "modelBased", bv.flags], 'stable');
+            r.provenance.busVoltage = bv.description;
+            r.provenance.uncertainty = bv.uncertainty;
+        else
+            r = levelResult(r, st, -st.mean, S, true);
+        end
     case "IfDiode"
         st = windowStats(ctx, sig.I, range, S);
         value = st.mean;

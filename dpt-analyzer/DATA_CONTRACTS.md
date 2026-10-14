@@ -44,6 +44,8 @@ Issues are created with `dptIssue(...)`; `dptIssue()` returns an empty 0×1 arra
 | `cfg.nominal.busVoltage`, `.testCurrent` | double or `[]` | no (default `[]`) | Used only by `"nominal"` (Custom) operating-point methods. |
 | `cfg.currentNormalization.enable` | logical | no (default `false`) | Opt-in current-sensor normalization (MEASUREMENT_DESIGN.md §7.3). |
 | `cfg.currentNormalization.reference` | `"Iout"` \| `"Id"` | no (default `"Iout"`) | The sensor taken as truth. |
+| `cfg.circuit.Cdc` | double [F] or `[]` | no (default `[]`) | DC-link capacitance, for the charge-droop bus-voltage model (MEASUREMENT_DESIGN.md §12). |
+| `cfg.circuit.CdcTolerance` | fraction in [0, 1) | no (default 0.2) | Its tolerance; propagated into the V_DC uncertainty. |
 
 Validated by `cfg = validateBucketConfig(cfg, S, scriptDir)`. Unknown or missing fields are errors.
 - `high > low`.
@@ -140,6 +142,7 @@ The required variables are `data`, `time`, `sampleInterval` and `verticalUnits`.
 | `recordLength` | double | Shared N. |
 | `channels` | 1×K struct | One element per mapped channel, in map order (fields below). |
 | `unmappedFiles` | string array | `.mat` files present but not mapped. |
+| `busVoltage` | struct | Bus-voltage model V_DC(t) from `busVoltageModel` (pipeline step 6c). Fields: `source` (`busChannel`/`kvl`/`chargeDroop`/`constant`/`none`), `label`, `description`, `V0`, `V0source`, `C`, `Ctolerance`, `currentSignal`, `onIntervals`, `signals`, `droopDetected`, `maxDroop`, `cEstimate`, `breakTimes`, `breakVds`. Read V_DC only through `busVoltageAt`. Default: source `none`, description "not run". |
 | `normalization` | struct | Outcome of `normalizeCurrentSensors` (pipeline step 6b): `applied`, `reference`, `adjusted`, `gain`, `offset`, `residualRms`, `expectedRms`, `pulseGains`, `gainSpread`, `nPulses`, `reason`. Default: not applied, reason "not run". |
 | `issues` | struct array | §0.1 |
 

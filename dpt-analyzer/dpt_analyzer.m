@@ -10,7 +10,8 @@
 %     4. Import and validate each collection
 %     5. Detect the active gate's transitions in each collection
 %     6. Align collections on matched edges; build the pulse timeline and
-%        measurement windows; normalize current sensors (opt-in)
+%        measurement windows; normalize current sensors (opt-in); build
+%        the bus-voltage model V_DC(t)
 %     7. Run eligible measurements                (Batches 5-6)
 %     8. Report results                           (Batch 6)
 %
@@ -35,6 +36,21 @@ cfg.gate.nominal.low   = -5;               % [V] active gate off-state drive
 % on-state of every pulse, taking one of them as the truth.
 cfg.currentNormalization.enable    = false;
 cfg.currentNormalization.reference = "Iout";   % "Iout" | "Id"
+
+%% DC bus ------------------------------------------------------------
+% The analyzer needs the bus voltage V_DC, which droops during the pulse
+% train as the pulses drain the DC link. It takes V_DC from the first of:
+%   1. a bus-voltage channel, if one is mapped as "Vdc";
+%   2. both V_DS channels, if both are mapped: V_DC = V_DS,HS + V_DS,LS;
+%   3. the DC-link capacitance below: V_DC falls by Q/C as the pulses
+%      draw charge Q from the link, starting from the V_DS measured
+%      before the first pulse;
+%   4. a constant V_DC equal to the V_DS before the first pulse (or
+%      cfg.nominal.busVoltage). If the record shows droop, the results
+%      are flagged and the summary tells you.
+% The summary states which one was used for each collection.
+cfg.circuit.Cdc          = [];      % [F] DC-link capacitance, e.g. 680e-6; [] = unknown
+cfg.circuit.CdcTolerance = 0.20;    % [-] tolerance of Cdc (DC-link capacitors: typ. 20 %)
 
 %% Settings overrides (optional) ---------------------------------------
 % Example: settingsOverrides.report.verbosity = "verbose";
@@ -125,6 +141,12 @@ for k = 1:numel(collections)
     issues = [issues; iss]; %#ok<AGROW>
 end
 
+%% 6c. Bus-voltage model V_DC(t) ----------------------------------------
+for k = 1:numel(collections)
+    [collections(k), iss] = busVoltageModel(collections(k), k, al, tl, cfg, S);
+    issues = [issues; iss]; %#ok<AGROW>
+end
+
 %% Summary --------------------------------------------------------------
 if S.report.verbosity ~= "quiet"
     fprintf('Bucket: %s  (active device: %s)\n', cfg.bucketPath, cfg.activeDevice);
@@ -143,6 +165,11 @@ if S.report.verbosity ~= "quiet"
                 nz.reference, nz.adjusted, nz.gain, nz.offset);
         elseif cfg.currentNormalization.enable
             fprintf('  %-16s currents NOT normalized: %s\n', '', nz.reason);
+        end
+        fprintf('  %-16s V_DC(t): %s\n', '', col.busVoltage.description);
+        if col.busVoltage.droopDetected
+            fprintf('  %-16s   BUS DROOP DETECTED (>= %.3g V below V_DC0): set cfg.circuit.Cdc\n', ...
+                '', col.busVoltage.maxDroop);
         end
     end
     for x = excluded

@@ -14,6 +14,7 @@ function col = importCollection(collectionPath, cfg, S)
 %                     recordLength, source, zeroIndex, meta
 %     unmappedFiles   .mat files present but not in the map
 %     normalization   outcome of normalizeCurrentSensors (not run here)
+%     busVoltage      bus-voltage model V_DC(t) (busVoltageModel; not run here)
 %     issues          issue records (dptIssue)
 %
 %   The collection is rejected (error) if the map is invalid, a mapped
@@ -178,6 +179,12 @@ col.unmappedFiles = unmapped;
 col.normalization = struct('applied', false, 'reference', "", 'adjusted', "", ...
     'gain', 1, 'offset', 0, 'residualRms', NaN, 'expectedRms', NaN, ...
     'pulseGains', [], 'gainSpread', NaN, 'nPulses', 0, 'reason', "not run");
+% Bus-voltage model V_DC(t); filled in by busVoltageModel after the
+% timeline is built.
+col.busVoltage = struct('source', "none", 'label', "none", 'description', "not run", ...
+    'V0', NaN, 'V0source', "", 'C', [], 'Ctolerance', [], 'currentSignal', "", ...
+    'onIntervals', zeros(0, 2), 'signals', strings(1, 0), 'droopDetected', false, ...
+    'maxDroop', NaN, 'cEstimate', NaN, 'breakTimes', [], 'breakVds', []);
 col.issues = issues;
 
 end

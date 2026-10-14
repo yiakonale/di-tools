@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.6.0";
+S.schemaVersion = "0.7.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -258,6 +258,35 @@ S.corrections.nonIntegerDeskew = "round";
 % already an integer (e.g. 1.28 ns / 160 ps = 8 +/- 1e-15).
 S.corrections.integerShiftTol = 1e-6;
 
+%% DC bus voltage model -------------------------------------------------
+% V_DC(t) is estimated once per collection from the first available
+% source in this list (MEASUREMENT_DESIGN.md section 12). Every
+% V_DC-dependent result states the source used.
+%   "busChannel" : a mapped bus-voltage channel (Vdc)
+%   "kvl"        : V_DS,HS + V_DS,LS, when both are mapped. Valid on
+%                  settled segments; during switching transients the
+%                  loop's L*di/dt adds to it.
+%   "chargeDroop": V_DC0 - Q(t)/C_dc, with Q the charge drawn from the DC
+%                  link while the active device conducts. Needs
+%                  cfg.circuit.Cdc; its tolerance becomes the uncertainty.
+%   "constant"   : V_DC0 for the whole record. A pulse break whose
+%                  off-state V_DS lies below V_DC0 proves droop (V_F > 0),
+%                  and results are flagged "busDroopDetected".
+% V_DC0 is the active V_DS before the first pulse (no current flows and
+% the inductor shorts the other device, so it equals V_DC), else
+% cfg.nominal.busVoltage.
+S.busVoltage.sources = ["busChannel", "kvl", "chargeDroop", "constant"];
+
+% Warn when the pre-pulse V_DS and cfg.nominal.busVoltage differ by more
+% than this fraction (wrong setpoint entered, or a probe error).
+S.busVoltage.nominalTolerance = 0.05;
+
+% Inductor current before the first pulse counts as a pre-charge (V_DC0
+% would include a diode drop) only above this fraction of the record's
+% peak current; smaller readings are probe zero offsets (the example
+% record shows -5 A against a 638 A peak).
+S.busVoltage.prePulseCurrentFraction = 0.02;
+
 %% Measurement windows ------------------------------------------------
 % One window per (edge, collection), anchored to that collection's
 % detected gate edge. The window CORE is the qualified gate edge itself:
@@ -341,13 +370,14 @@ S.measurements.enableOptional = strings(1, 0);
 % Method preference per measurement: the first method whose required
 % signals exist in the collection is used and reported. "nominal" uses
 % cfg.nominal and is only used when listed.
-S.measurements.methods.VdcOff        = ["busChannel", "settledVds"];
-S.measurements.methods.VdcOn         = ["busChannel", "offStateVds"];
+S.measurements.methods.VdcOff        = ["model", "settledVds"];
+S.measurements.methods.VdcOn         = ["model", "offStateVds"];
 S.measurements.methods.Ioff          = ["inductorAtInstant", "idAtGate90"];
 S.measurements.methods.Ion           = ["inductorAtInstant", "extrapolatedId"];
 S.measurements.methods.onStateWindow = "finalPortion";   % #49-51, #54 device
 S.measurements.methods.RonEff        = "averaged";
 S.measurements.methods.IfDiode       = ["inductorDuringBreak", "measuredDiode"];
+S.measurements.methods.Vf            = ["breakWindow", "busModel"];
 
 % Method parameters.
 % onStateWindow "delayToEnd": delay after V_DS reaches 10 % at turn-on
@@ -505,6 +535,16 @@ mustBeEmptyOrPositiveScalar(S.alignment.maxResidual, 'alignment.maxResidual');
 % Sampling
 mustBePositiveScalar(S.sampling.sampleIntervalRelTol, 'sampling.sampleIntervalRelTol');
 mustBePositiveScalar(S.sampling.timeVectorRelTol, 'sampling.timeVectorRelTol');
+
+% Bus voltage model
+src = S.busVoltage.sources;
+if ~isstring(src) || isempty(src) || numel(unique(src)) ~= numel(src) || ...
+        ~all(ismember(src, ["busChannel", "kvl", "chargeDroop", "constant"]))
+    fail('busVoltage.sources', ['must be a non-empty list without repeats of ' ...
+        '"busChannel", "kvl", "chargeDroop", "constant".']);
+end
+mustBeFraction(S.busVoltage.nominalTolerance, 'busVoltage.nominalTolerance');
+mustBeFraction(S.busVoltage.prePulseCurrentFraction, 'busVoltage.prePulseCurrentFraction');
 
 % Corrections
 mustBeOption(S.corrections.nonIntegerDeskew, ["round", "error"], ...

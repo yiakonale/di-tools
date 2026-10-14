@@ -17,19 +17,21 @@ Newest entries go at the top of each section. Every completed step is committed 
 
 ## Resume here
 
-_Last session ended 2026-10-14. Every step is committed locally._
+_Last session ended 2026-10-15. Every step is committed locally._
 
 **State:**
 - Batches 1–4 are done.
-- In Batch 5: 5a (design) and 5b (primitives) are done. 5c (normalization, operating point #1–4, conduction #49–54) is implemented and tested.
-- Running `dpt_analyzer.m` executes workflow steps 1–6b (import → detection → alignment → timeline → optional current normalization) on `data/example`.
+- In Batch 5: 5a (design), 5b (primitives) and 5c (normalization, operating point #1–4, conduction #49–54, and the bus-voltage model V_DC(t)) are implemented and tested.
+- Running `dpt_analyzer.m` executes workflow steps 1–6c (import → detection → alignment → timeline → optional current normalization → bus-voltage model) on `data/example`. The summary states the V_DC source per collection.
 - Measurements are implemented and tested but **not yet run by the entry script**; that is Batch 6 (`runMeasurements`).
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point` (38 + 31 + 33 + 39 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage` (38 + 31 + 33 + 39 + 25 cases, plus the settings checks).
 
-**Next step (pick up here): implement the bus-voltage model V_DC(t)**, approved but not yet coded. See [MEASUREMENT_DESIGN.md §12](MEASUREMENT_DESIGN.md).
+**Next step (pick up here): Batch 5d** (timing #13–23, slew rates #24–28, and the IEC-8/IEC-9 presets). The bus-voltage model is done (design §12.4); its former plan is kept below for reference.
+
+_Done 2026-10-15:_
 1. **Config:** `cfg.circuit.Cdc` [F] and `cfg.circuit.CdcTolerance` (default 0.2). Settings: a V_DC source preference list (busChannel, kvl, chargeDroop, constant).
 2. **`busVoltageModel`, once per collection (pipeline step after 6b).** Produces V_DC(t) with its source:
    - bus channel, or KVL (V_DS,HS + V_DS,LS on settled segments), or charge droop V_DC0 − Q(t)/C_dc, or constant V_DC0;
@@ -41,7 +43,7 @@ _Last session ended 2026-10-14. Every step is committed locally._
 4. **UI:** the run summary states the V_DC source per collection; results carry it. Write the `dpt_analyzer.m` config block in plain words.
 5. **Tests:** synthetic set (makeSyntheticDPT already models droop via `vdcSlope`; add a charge-based droop option) and example checks: C ≈ 0.685 mF, droop 404 → 374 V.
 
-Then **Batch 5d** (timing #13–23, slew rates #24–28).
+(All five plan steps are done.)
 - [MEASUREMENT_DESIGN.md](MEASUREMENT_DESIGN.md) is approved; its §10.1 records every decision.
 - The user's specification is stored verbatim in [MEASUREMENT_SPEC.md](MEASUREMENT_SPEC.md); row numbers #1–#55 refer to it.
 - Sub-batch order: 5b primitives, then 5c operating point and conduction, 5d timing and slew, 5e energy, 5f stress, 5g reverse recovery, 5h parasitics, then Batch 6.
@@ -77,6 +79,8 @@ Then **Batch 5d** (timing #13–23, slew rates #24–28).
 | `sync/detectGateTransitions.m` | Measures the gate levels, qualifies edges by hysteresis, times them on a local smoothed copy. |
 | `sync/alignCollections.m` | Chooses the reference collection, matches edges, estimates offsets and residuals, excludes collections that cannot be aligned. |
 | `sync/buildPulseTimeline.m` | Universal edges, pulses, and per-(edge, collection) windows. |
+| `busVoltageModel.m` | Bus-voltage model V_DC(t), pipeline step 6c: source selection (bus channel → KVL → charge droop → constant) and diagnostics (droop check, C cross-check, implied V_F, pre-pulse current, nominal mismatch). |
+| `measurements/busVoltageAt.m`, `chargeAt.m` | V_DC over a time range from the model (the only way measurements read V_DC); charge drawn from the DC link. |
 | `normalizeCurrentSensors.m` | Opt-in I_D / I_L sensor calibration on the on-state segments (pipeline step 6b). |
 | `measurements/measurementRegistry.m` | Measurement and method definitions (slots, tags, implementations). Currently #1–4 and #49–54. |
 | `measurements/evaluateMeasurement.m` | Optional/device gating, method selection by preference and available signals, skip reasons. |
@@ -85,9 +89,25 @@ Then **Batch 5d** (timing #13–23, slew rates #24–28).
 | `tests/makeSyntheticDPT.m` | Synthetic phase-leg generator with known truth, for measurement tests. |
 | `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`. |
 | `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
-| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`); formalized in Batch 7. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-15 — Bus-voltage model V_DC(t) implemented
+
+- **Implemented** design §12 as planned. Files: `busVoltageModel.m` (step 6c), `measurements/busVoltageAt.m`, `chargeAt.m`. Settings 0.7.0. New bucket fields `cfg.circuit.Cdc`/`CdcTolerance`.
+- **#1/#2:** the `model` method replaces `busChannel`, and its tag states the source (`[Conv: V_DC(t) from KVL]`). **#52** gains a model-based V_F fallback.
+- **The entry script** has a plain-language "DC bus" block and prints `V_DC(t): <source>` per collection, plus a `BUS DROOP DETECTED` line when relevant.
+- **Refinements while implementing:**
+  - **Uncertainty is conservative:** droop·tol/(1 − tol) (worst case at C·(1 − tol)), i.e. 25 % for tol = 20 %. The first version used tol·droop, which only just failed to cover a 20 % C error.
+  - **Charge intervals depend on the signal:** I_D over the full event windows (it is zero outside conduction), Iout only to the gate cores (it carries the freewheel current after turn-off).
+  - **Pre-pulse current warning** now also needs more than 2 % of the peak current (new setting). The example's −4.8 A Iout offset had raised a false alarm.
+  - **The C estimate depends on the current-sensor calibration** (0.680 vs 0.637 mF with or without normalization); the message names the sensor.
+  - **Synthetic generator:** a charge-droop option (`Cdc`), and a 1 mA diode-onset threshold. Femtoamp tails of the smooth switch model had switched on a full V_F before pulse 1.
+- **Verified:**
+  - `tests/test_bus_voltage.m` passes 25 cases: every source against synthetic truth; C ± 20 % within the reported uncertainty; droop check; C cross-check; nominal mismatch; skip without any source; example KVL / charge droop / constant.
+  - Example: KVL V_DC0 = 403.0 V and C = 0.680 mF. Last turn-off: KVL 372.4 V, single-V_DS + C 374.1 V. Without C, droop of at least 21.7 V detected.
+  - `test_operating_point` updated to the new methods (39 pass). All other suites pass.
 
 ### 2026-10-14 — Drooping bus: V_DC(t) model approved (not yet implemented)
 
