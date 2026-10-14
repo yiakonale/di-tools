@@ -19,6 +19,8 @@ function result = runPipeline(cfg, S)
 %     collections   1-by-C aligned collections (al.collections order)
 %     evs           1-by-C gate events, same order
 %     al, tl        alignment and timeline
+%     bucketC       DC-link capacitance measured in the bucket
+%                   (bucketCapacitance; value NaN if none)
 %     excluded      struct array: name, reason
 %     issues        all issue records, in pipeline order
 %
@@ -105,10 +107,25 @@ for k = 1:numel(collections)
 end
 
 %% 6c. Bus-voltage model V_DC(t)
+% First pass: every collection on its own. Collections that measure V_DC
+% directly (Vdc channel or both V_DS) also measure the DC-link
+% capacitance; the bucket shares one setup, so that C is then used for
+% the collections that have only one V_DS (second pass), in preference
+% to cfg.circuit.Cdc.
+% Only each collection's final pass contributes issues.
+busIssues = cell(1, numel(collections));
 for k = 1:numel(collections)
-    [collections(k), iss] = busVoltageModel(collections(k), k, al, tl, cfg, S);
-    issues = [issues; iss]; %#ok<AGROW>
+    [collections(k), busIssues{k}] = busVoltageModel(collections(k), k, al, tl, cfg, S);
 end
+[bucketC, iss] = bucketCapacitance(collections, cfg, S);
+if ~isnan(bucketC.value)
+    for k = 1:numel(collections)
+        if ~ismember(collections(k).busVoltage.source, ["busChannel", "kvl"])
+            [collections(k), busIssues{k}] = busVoltageModel(collections(k), k, al, tl, cfg, S, bucketC);
+        end
+    end
+end
+issues = [issues; vertcat(busIssues{:}); iss];
 
 result.cfg = cfg;
 result.S = S;
@@ -116,6 +133,7 @@ result.collections = collections;
 result.evs = evs;
 result.al = al;
 result.tl = tl;
+result.bucketC = bucketC;
 result.excluded = excluded;
 result.issues = issues;
 

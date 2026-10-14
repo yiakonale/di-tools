@@ -1,5 +1,9 @@
-function [col, issues] = busVoltageModel(col, c, al, tl, cfg, S)
+function [col, issues] = busVoltageModel(col, c, al, tl, cfg, S, bucketC)
 %BUSVOLTAGEMODEL Choose and characterize the bus-voltage source V_DC(t).
+%
+%   [col, issues] = busVoltageModel(col, c, al, tl, cfg, S, bucketC) uses
+%   the capacitance measured in the bucket's direct-source collections
+%   (bucketCapacitance) in preference to cfg.circuit.Cdc.
 %
 %   [col, issues] = busVoltageModel(col, c, al, tl, cfg, S) selects how
 %   V_DC(t) is obtained for one collection (MEASUREMENT_DESIGN.md section
@@ -45,10 +49,27 @@ arguments
     tl (1,1) struct
     cfg (1,1) struct
     S (1,1) struct
+    bucketC = []
 end
 
 issues = dptIssue();
+% Start from a clean model, so a re-run (with the bucket's C) carries no
+% results of an earlier pass.
 bm = col.busVoltage;
+bm.source = "none";
+bm.label = "none";
+bm.description = "";
+bm.V0 = NaN;
+bm.V0source = "";
+bm.currentSignal = "";
+bm.signals = strings(1, 0);
+bm.droopDetected = false;
+bm.maxDroop = NaN;
+bm.cEstimate = NaN;
+bm.cEstimateRelSE = NaN;
+bm.cEstimateSignal = "";
+bm.breakTimes = [];
+bm.breakVds = [];
 k = S.measurements.common.noiseFloorMultiple;
 present = [col.channels.signal];
 has = @(role) any(present == resolveRole(role, cfg, S));
@@ -117,8 +138,18 @@ elseif ~isnan(bm.V0) && ~isempty(nominal) && abs(bm.V0 / nominal - 1) > S.busVol
 end
 
 %% Source selection
+% C: measured in this bucket (preferred), else cfg.circuit.Cdc.
 bm.C = cfg.circuit.Cdc;
 bm.Ctolerance = cfg.circuit.CdcTolerance;
+bm.Csource = "";
+if ~isempty(bm.C)
+    bm.Csource = "cfg.circuit.Cdc";
+end
+if ~isempty(bucketC) && ~isnan(bucketC.value)
+    bm.C = bucketC.value;
+    bm.Ctolerance = bucketC.relUncertainty;
+    bm.Csource = bucketC.description;
+end
 for src = S.busVoltage.sources
     switch src
         case "busChannel"
@@ -148,9 +179,9 @@ switch bm.source
     case "chargeDroop"
         bm.label = "charge droop";
         bm.signals = bm.currentSignal;
-        bm.description = sprintf(['charge droop: V_DC0 = %.4g V (%s), C = %s +/- %g %%, ' ...
-            'charge from %s'], bm.V0, bm.V0source, engineering(bm.C, "F"), ...
-            100 * bm.Ctolerance, bm.currentSignal);
+        bm.description = sprintf(['charge droop: V_DC0 = %.4g V (%s), C = %s +/- %.2g %% ' ...
+            '(%s), charge from %s'], bm.V0, bm.V0source, engineering(bm.C, "F"), ...
+            100 * bm.Ctolerance, bm.Csource, bm.currentSignal);
     case "constant"
         bm.label = "constant";
         bm.description = sprintf('constant V_DC0 = %.4g V (%s)', bm.V0, bm.V0source);
@@ -196,9 +227,11 @@ if has("drainVoltage@active") && height(P) >= 1
         end
     end
 
-    if numel(Vb) >= 2 && (bm.source == "busChannel" || bm.source == "kvl")
+    if (bm.source == "busChannel" || bm.source == "kvl") && ~isempty(Vb)
         % Droop measured by the direct source vs charge drawn, on the
-        % settled break segments.
+        % settled break segments plus the pre-pulse segment (Q = 0). The
+        % pre-pulse point lets a 3-pulse train give an uncertainty and a
+        % classic 2-pulse DPT an estimate at all.
         direct = col;
         direct.busVoltage = bm;
         Vd = nan(size(tb));
@@ -207,13 +240,28 @@ if has("drainVoltage@active") && height(P) >= 1
             Vd(j) = busVoltageAt(direct, segs(j, :), S).value;
             Q(j) = chargeAt(col, bm, tb(j), S);
         end
+        if preOk
+            Vd = [busVoltageAt(direct, pre, S).value; Vd];
+            Q = [0; Q];
+        end
         if bm.currentSignal ~= "" && max(Q) > min(Q)
             fit = [Q, ones(size(Q))] \ Vd;
             if fit(1) < 0
                 bm.cEstimate = -1 / fit(1);
+                % Relative standard error of the fitted slope (= of C).
+                if numel(Q) >= 3
+                    res = Vd - [Q, ones(size(Q))] * fit;
+                    se = sqrt(sum(res.^2) / (numel(Q) - 2) / sum((Q - mean(Q)).^2));
+                    bm.cEstimateRelSE = se / abs(fit(1));
+                end
+                bm.cEstimateSignal = bm.currentSignal;
                 msg = sprintf(['DC-link capacitance from the measured droop: %s ' ...
                     '(charge from %s; scales with that sensor''s calibration)'], ...
                     engineering(bm.cEstimate, "F"), bm.currentSignal);
+                if numel(Q) < 3
+                    msg = msg + sprintf([" from only %d points, so without an uncertainty; " ...
+                        "not shared with the bucket's other collections"], numel(Q));
+                end
                 severity = "info";
                 if ~isempty(bm.C)
                     dev = bm.cEstimate / bm.C - 1;

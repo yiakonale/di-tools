@@ -106,5 +106,66 @@ check(abs(r.value) < 1, sprintf('example pulse 1 I_on now ~0: %s', formatResult(
 r = run(res, "Vf", 1, [res.tl.pulses.turnOffEdge(1), res.tl.pulses.turnOnEdge(2)], "break");
 check(r.value > 3 && r.value < 4.2, sprintf('example V_F break 1 (was 4.8 V with the -1.42 V offset): %s', formatResult(r)));
 
+%% Bucket capacitance ----------------------------------------------------------------
+C0 = 60e-6;
+full = ["Vgs-LS", "Vds-LS", "Vds-HS", "Id-LS"];
+single = ["Vgs-LS", "Vds-LS", "Id-LS"];
+b5 = fullfile(root, 'c1');
+tr = makeSyntheticDPT(fullfile(b5, 'A_full'), struct('Cdc', C0, 'channels', full));
+makeSyntheticDPT(fullfile(b5, 'B_single'), struct('Cdc', C0, 'channels', single));
+res = pipeline(b5, false, false, struct('Cdc', 100e-6));     % cfg C deliberately wrong
+bA = res.collections([res.collections.name] == "A_full").busVoltage;
+bB = res.collections([res.collections.name] == "B_single").busVoltage;
+check(bA.source == "kvl" && abs(res.bucketC.value / C0 - 1) < 0.01 && res.bucketC.collections == "A_full", ...
+    sprintf('bucket C measured in the KVL collection: %.4g uF +/- %.2g %%', res.bucketC.value * 1e6, 100 * res.bucketC.relUncertainty));
+check(bB.source == "chargeDroop" && bB.C == res.bucketC.value && contains(bB.Csource, "A_full") && ...
+    contains(bB.description, "measured in A_full"), 'single-V_DS collection uses the bucket C, not the wrong cfg C');
+cB = find([res.collections.name] == "B_single");
+r = run(res, "VdcOff", cB, 6, "turnOff");
+w = r.provenance.window + res.tl.edges.time(6) + res.al.offset(cB);
+truth = truthMean(tr, tr.vdc, w);
+check(abs(r.value - truth) < 0.1 && r.provenance.uncertainty < 0.5, sprintf( ...
+    'single-V_DS V_DC,off with bucket C: %s (true %.3f V)', formatResult(r), truth));
+check(~hasIssue(res.issues, "dpt:busVoltage:droopDetected"), 'no stale first-pass droop warning');
+
+b6 = fullfile(root, 'c2');
+makeSyntheticDPT(fullfile(b6, 'B_single'), struct('Cdc', C0, 'channels', single));
+res = pipeline(b6, false, false, struct('Cdc', C0));
+check(isnan(res.bucketC.value) && res.collections(1).busVoltage.Csource == "cfg.circuit.Cdc", ...
+    'no direct-source collection: falls back to cfg.circuit.Cdc');
+
+b7 = fullfile(root, 'c3');
+makeSyntheticDPT(fullfile(b7, 'A1'), struct('Cdc', C0, 'channels', full));
+makeSyntheticDPT(fullfile(b7, 'A2'), struct('Cdc', 1.1 * C0, 'channels', full));
+res = pipeline(b7, false);
+check(hasIssue(res.issues, "dpt:busVoltage:capacitanceSpread") && res.bucketC.relUncertainty >= 0.04, ...
+    sprintf('two direct collections disagreeing by 10 %%: warned, uncertainty %.2g %%', 100 * res.bucketC.relUncertainty));
+
+% Example record as a two-collection bucket: the full record + a single-V_DS copy.
+exDir = fullfile(codeDir, 'data', 'example', 'collection_A');
+b8 = fullfile(root, 'ex');
+mkdir(fullfile(b8, 'full')); mkdir(fullfile(b8, 'single'));
+for f = ["ch1", "ch2", "ch3", "ch4", "ch7", "math1"]
+    copyfile(fullfile(exDir, "Tek000_" + f + ".mat"), fullfile(b8, 'full'));
+end
+copyfile(fullfile(exDir, 'channelMap.m'), fullfile(b8, 'full'));
+for f = ["ch2", "ch3", "math1"]
+    copyfile(fullfile(exDir, "Tek000_" + f + ".mat"), fullfile(b8, 'single'));
+end
+writelines(["function map = channelMap()"
+    "map.channels.CH2 = struct(""signal"", ""Vgs-LS"", ""file"", ""Tek000_ch2.mat"");"
+    "map.channels.CH3 = struct(""signal"", ""Vds-LS"", ""file"", ""Tek000_ch3.mat"");"
+    "map.channels.MATH1 = struct(""signal"", ""Id-LS"", ""file"", ""Tek000_math1.mat"");"
+    "end"], fullfile(b8, 'single', 'channelMap.m'));
+res = pipeline(b8, true, true);
+iF = find([res.collections.name] == "full"); iS = find([res.collections.name] == "single");
+lastOff = res.tl.pulses.turnOffEdge(end);
+rF = run(res, "VdcOff", iF, lastOff, "turnOff");
+rS = run(res, "VdcOff", iS, lastOff, "turnOff");
+check(res.collections(iS).busVoltage.source == "chargeDroop" && abs(res.bucketC.value - 0.685e-3) < 0.035e-3, ...
+    sprintf('example bucket: C = %.4g mF +/- %.2g %% measured in "full", applied to "single"', ...
+    res.bucketC.value * 1e3, 100 * res.bucketC.relUncertainty));
+check(abs(rS.value - rF.value) < 2, sprintf('example last turn-off: single %s vs full %s', formatResult(rS), formatResult(rF)));
+
 fprintf('\n%d passed, %d failed\n', nPass, nFail);
 end

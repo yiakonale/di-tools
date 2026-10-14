@@ -513,3 +513,50 @@ The issue message says which sensor the charge came from.
 | Both V_DS | KVL (V_DC0 = 403.0 V) | 372.4 V |
 | Single-V_DS copy, C = 0.685 mF | charge droop | 374.1 V |
 | Single-V_DS copy, no C | constant | droop of at least 21.7 V detected, results flagged |
+
+### 12.5 C measured in the bucket (2026-10-15)
+
+**User decision.** Measure V_DC automatically in the collections that capture it (a Vdc channel, or both V_DS), and use it for the rest of the bucket. Fall back to the other methods when no such collection exists. In effect, such a collection is the bucket's **calibration run**: this is the "calibration routine" of §12.2 within the existing data model.
+
+**How it works.**
+
+1. **Per-collection estimate.** Each direct-source collection fits its measured V_DC against the charge drawn. The points are the pre-pulse segment (Q = 0) and the settled pulse breaks. The fit gives C and its relative standard error, which needs at least 3 points: a 3-pulse train is enough, while a classic 2-pulse DPT gives an estimate but no uncertainty and is not shared.
+2. **Bucket value.** `bucketCapacitance` takes the inverse-variance weighted mean of the estimates.
+   - Uncertainty: 2 SE (95 %), or the largest deviation of an individual estimate from the mean if that is larger.
+   - Disagreement beyond the fit errors is warned about.
+   - Estimates based on different current signals are warned about too, because only the same sensor cancels its gain error.
+3. **Precedence.** A **bucket-measured C** is used, otherwise `cfg.circuit.Cdc ± CdcTolerance`, otherwise the remaining fallbacks (constant with droop check). The model description names the C source, e.g. "C = 680.6 uF +/- 4.4 % (measured in full)".
+
+**[data] Example** as a two-collection bucket (the full record plus a single-V_DS copy):
+
+- C = 0.681 mF ± 4.4 %, measured in the full record;
+- at the last turn-off, the single copy gives 374.0 V against 373.8 V from KVL in the full record.
+
+### 12.6 Zero-offset correction (2026-10-15)
+
+`zeroOffsetCorrection` (pipeline step 6a, opt-in via `cfg.zeroOffsetCorrection.enable`) subtracts the pre-pulse mean from channels that must read zero before the first pulse: the device currents, Iout, and the non-active V_DS (full and clamped). The inductor is at rest then, and it shorts the non-active device. It is applied as a declared correction, before normalization.
+
+It is refused in two cases:
+
+- the record does not start at rest (the first edge is not a turn-on);
+- a channel's "offset" exceeds 5 % of its scale (`S.zeroOffset.maxFraction`). That is a real signal, not an offset. The limit was first 2 %, but probe offsets do not shrink with test current, so 2 % refused legitimate offsets on a 180 A synthetic test.
+
+**[data] Example.**
+
+| Channel | Offset removed |
+|---|---|
+| Iout | −4.84 A |
+| Id-LS | −3.73 A |
+| Vds-HS | −1.42 V |
+
+Effects:
+
+- Pulse 1's I_on goes from −4.1 A to +0.7 A.
+- V_F in break 1 goes from 4.8 V to 3.4 V.
+- The current normalization keeps k = 1.069. Its offset becomes b = +0.75 A, because the pre-pulse offsets do not fully explain the sensors' disagreement under load. The residual is below a fifth of one Iout ADC step (4 A), so this record cannot resolve it.
+
+### 12.7 End-point searches (decision for 5d, 2026-10-15)
+
+Threshold **end points** (e.g. I_D 2 % at turn-off, V_DS 2 % of V_DC at turn-on, settling) are searched up to the **territory end**, not only the event-window end. The event window is the anchor and the coverage check.
+
+**[data]** On the example, every such end point already lies 0.45–1.6 µs inside the window. Extending to the territory covers long IGBT tails without a device-specific `post` margin.

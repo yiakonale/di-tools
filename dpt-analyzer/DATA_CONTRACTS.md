@@ -45,7 +45,8 @@ Issues are created with `dptIssue(...)`; `dptIssue()` returns an empty 0×1 arra
 | `cfg.currentNormalization.enable` | logical | no (default `false`) | Opt-in current-sensor normalization (MEASUREMENT_DESIGN.md §7.3). |
 | `cfg.currentNormalization.reference` | `"Iout"` \| `"Id"` | no (default `"Iout"`) | The sensor taken as truth. |
 | `cfg.circuit.Cdc` | double [F] or `[]` | no (default `[]`) | DC-link capacitance, for the charge-droop bus-voltage model (MEASUREMENT_DESIGN.md §12). |
-| `cfg.circuit.CdcTolerance` | fraction in [0, 1) | no (default 0.2) | Its tolerance; propagated into the V_DC uncertainty. |
+| `cfg.circuit.CdcTolerance` | fraction in [0, 1) | no (default 0.2) | Its tolerance; propagated into the V_DC uncertainty. Used only when the bucket has no collection that measures V_DC directly (§12 of the design). |
+| `cfg.zeroOffsetCorrection.enable` | logical | no (default `false`) | Opt-in removal of probe zero offsets measured before pulse 1 (`zeroOffsetCorrection`). |
 
 Validated by `cfg = validateBucketConfig(cfg, S, scriptDir)`. Unknown or missing fields are errors.
 - `high > low`.
@@ -142,7 +143,8 @@ The required variables are `data`, `time`, `sampleInterval` and `verticalUnits`.
 | `recordLength` | double | Shared N. |
 | `channels` | 1×K struct | One element per mapped channel, in map order (fields below). |
 | `unmappedFiles` | string array | `.mat` files present but not mapped. |
-| `busVoltage` | struct | Bus-voltage model V_DC(t) from `busVoltageModel` (pipeline step 6c). Fields: `source` (`busChannel`/`kvl`/`chargeDroop`/`constant`/`none`), `label`, `description`, `V0`, `V0source`, `C`, `Ctolerance`, `currentSignal`, `onIntervals`, `signals`, `droopDetected`, `maxDroop`, `cEstimate`, `breakTimes`, `breakVds`. Read V_DC only through `busVoltageAt`. Default: source `none`, description "not run". |
+| `zeroOffset` | struct | Outcome of `zeroOffsetCorrection` (pipeline step 6a): `applied`, `signals`, `offsets`, `reason`. |
+| `busVoltage` | struct | Bus-voltage model V_DC(t) from `busVoltageModel` (pipeline step 6c). Fields: `source` (`busChannel`/`kvl`/`chargeDroop`/`constant`/`none`), `label`, `description`, `V0`, `V0source`, `C`, `Ctolerance`, `currentSignal`, `onIntervals`, `signals`, `droopDetected`, `maxDroop`, `cEstimate`, `cEstimateRelSE`, `cEstimateSignal`, `Csource`, `breakTimes`, `breakVds`. Read V_DC only through `busVoltageAt`. Default: source `none`, description "not run". |
 | `normalization` | struct | Outcome of `normalizeCurrentSensors` (pipeline step 6b): `applied`, `reference`, `adjusted`, `gain`, `offset`, `residualRms`, `expectedRms`, `pulseGains`, `gainSpread`, `nPulses`, `reason`. Default: not applied, reason "not run". |
 | `issues` | struct array | §0.1 |
 
@@ -157,6 +159,7 @@ The required variables are `data`, `time`, `sampleInterval` and `verticalUnits`.
 | `corrections.deskewApplied` | double [s] | Effective deskew after the non-integer policy (an integer multiple of dt). |
 | `corrections.shift` | double | `deskewApplied / dt`, in samples (an integer). |
 | `corrections.invert` | logical | As requested in the map. |
+| `corrections.zeroOffset` | double | Probe zero offset subtracted from this channel (default 0). Set only by `zeroOffsetCorrection`. |
 | `corrections.gain`, `corrections.offset` | double | Current-sensor normalization of this channel (default 1 and 0). Set only by `normalizeCurrentSensors`. |
 
 Signal lookup: `col.channels([col.channels.signal] == "Vds-LS")`. A struct array is used because the canonical names contain `-`, which is not valid in a field name.
@@ -170,7 +173,7 @@ This is the **only** way downstream code reads waveform samples. All corrections
 
   | Field | Meaning |
   |---|---|
-  | `x` | Corrected samples: `invert` applied, then `gain · x + offset` (normalization). |
+  | `x` | Corrected samples: `invert` applied, minus `zeroOffset`, then `gain · x + offset` (normalization). |
   | `t` | Corrected times, `col.time(k) + deskewApplied`. |
   | `index` | Raw sample indices k. |
   | `complete` | `false` if `tRange` extends beyond this channel's corrected record. |
@@ -347,3 +350,25 @@ Deferred, not blocking:
 
 - **ADC clipping detection.** It needs per-channel vertical range metadata, which the Tek exports do not include.
 - **Per-device currents for parallel devices.** These would need new catalog names such as `Id-LS-1`. They should only be added if a current-sharing measurement is specified.
+
+## 9. Pipeline result: `result = runPipeline(cfg, S)`
+
+`runPipeline` runs workflow steps 3–6c. `cfg` must already be validated by `validateBucketConfig`. The entry script only configures, calls it, and prints the summary.
+
+| Field | Meaning |
+|---|---|
+| `cfg`, `S` | The configuration used. |
+| `collections`, `evs` | Aligned collections and their gate events, in `al.collections` order. |
+| `al`, `tl` | Alignment and timeline. |
+| `bucketC` | DC-link capacitance measured in the bucket (`bucketCapacitance`): `value` (NaN if none), `relUncertainty`, `collections`, `signal`, `description`. |
+| `excluded` | `name`, `reason` of excluded collections. |
+| `issues` | All issue records, in pipeline order. For the bus-voltage model, only each collection's final pass is included. |
+
+Order of the per-collection steps after the timeline:
+
+1. **6a** — zero-offset correction;
+2. **6b** — current-sensor normalization;
+3. **6c** — bus-voltage model, run twice:
+   - first pass, for every collection on its own;
+   - then `bucketCapacitance` combines the C estimates;
+   - second pass, only for the collections without a direct V_DC source, using the bucket's C.

@@ -22,14 +22,14 @@ _Last session ended 2026-10-15. Every step is committed locally._
 **State:**
 - Batches 1–4 are done.
 - In Batch 5: 5a (design), 5b (primitives) and 5c (normalization, operating point #1–4, conduction #49–54, and the bus-voltage model V_DC(t)) are implemented and tested.
-- Running `dpt_analyzer.m` executes workflow steps 1–6c (import → detection → alignment → timeline → optional current normalization → bus-voltage model) on `data/example`. The summary states the V_DC source per collection.
+- `dpt_analyzer.m` only configures and calls `runPipeline(cfg, S)`, which runs workflow steps 3–6c: import → detection → alignment → timeline → zero-offset correction (opt-in, **on** in the example) → current normalization (opt-in) → bus-voltage model, using C measured in the bucket where possible. The summary states the offsets removed and the V_DC source per collection.
 - Measurements are implemented and tested but **not yet run by the entry script**; that is Batch 6 (`runMeasurements`).
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage` (38 + 31 + 33 + 39 + 25 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections` (38 + 31 + 33 + 39 + 25 + 20 cases, plus the settings checks).
 
-**Next step (pick up here): Batch 5d** (timing #13–23, slew rates #24–28, and the IEC-8/IEC-9 presets). The bus-voltage model is done (design §12.4); its former plan is kept below for reference.
+**Next step (pick up here): Batch 5d** (timing #13–23, slew rates #24–28, and the IEC-8/IEC-9 presets). Threshold end points are searched up to the territory end (design §12.7, decided 2026-10-15). The open points of 2026-10-14 are worked through (decision record 2026-10-15). The bus-voltage plan below is kept for reference.
 
 _Done 2026-10-15:_
 1. **Config:** `cfg.circuit.Cdc` [F] and `cfg.circuit.CdcTolerance` (default 0.2). Settings: a V_DC source preference list (busChannel, kvl, chargeDroop, constant).
@@ -49,13 +49,9 @@ _Done 2026-10-15:_
 - Sub-batch order: 5b primitives, then 5c operating point and conduction, 5d timing and slew, 5e energy, 5f stress, 5g reverse recovery, 5h parasitics, then Batch 6.
 
 **Open points:**
-- **V_DS probe calibration (about 1 %).** Vds-HS reads −2.8 V before pulse 1 (true 0 V). A possible opt-in zero-offset correction from the pre-pulse segment (design §12.3).
-- **Future feature: V_DC calibration routine.** Run the same pulse train with a dedicated Vdc channel to measure droop versus charge exactly for a bucket (design §12.2).
-- **Normalization acceptance limits are provisional:** residual ≤ 2× expected, gain spread ≤ 2 %.
-- **Confirm `cfg.deviceType = "MOSFET"`** for the example record (assumed SiC from the −5/+18 V drive and 3–8 V body-diode drop).
-- **Window margins are provisional.** `S.windows.adaptive.pre = 1`, `post = 2` (multiples of the gate-edge duration D). Revisit them against the Batch 5 threshold definitions; IGBT tail current may need a larger `post`.
-- **`S.alignment.maxResidual` is unset.** Calibrate it once a real bucket with two or more collections exists: the residuals will show the real shot-to-shot gate jitter.
-- **Batch 7 note:** the `clear` in `dpt_analyzer.m` wipes the caller's workspace, so tests must not `run` it from inside a function and expect that function's variables to survive.
+- **`S.alignment.maxResidual` is unset.** Only one bucket, with one collection, exists so far. Calibrate it once a real multi-collection bucket exists: its residuals will show the real shot-to-shot gate jitter.
+- **Possible extension: relative V_DS probe gain.** Vds-LS before pulse 1 and Vds-HS during pulse 1's on-state both measure about V_DC and differ by about 0.7 %. This could be calibrated like the current sensors. Not requested.
+- **Example normalization offset:** b = +0.75 A remains after zero correction. It is below a fifth of one Iout ADC step and so unresolvable; noted only.
 
 **Working agreements:**
 - Commit locally after every step. Stage only `dpt-analyzer/` paths: the parent `di/` repo has unrelated modified `.mlx` files.
@@ -81,6 +77,9 @@ _Done 2026-10-15:_
 | `sync/buildPulseTimeline.m` | Universal edges, pulses, and per-(edge, collection) windows. |
 | `busVoltageModel.m` | Bus-voltage model V_DC(t), pipeline step 6c: source selection (bus channel → KVL → charge droop → constant) and diagnostics (droop check, C cross-check, implied V_F, pre-pulse current, nominal mismatch). |
 | `measurements/busVoltageAt.m`, `chargeAt.m` | V_DC over a time range from the model (the only way measurements read V_DC); charge drawn from the DC link. |
+| `runPipeline.m` | Workflow steps 3–6c as a function (discovery → bus-voltage model); returns the pipeline result. |
+| `zeroOffsetCorrection.m` | Opt-in removal of probe zero offsets from the pre-pulse segment (step 6a). |
+| `bucketCapacitance.m` | Combines the DC-link capacitance measured in the bucket's direct-source collections, for use in its other collections. |
 | `normalizeCurrentSensors.m` | Opt-in I_D / I_L sensor calibration on the on-state segments (pipeline step 6b). |
 | `measurements/measurementRegistry.m` | Measurement and method definitions (slots, tags, implementations). Currently #1–4 and #49–54. |
 | `measurements/evaluateMeasurement.m` | Optional/device gating, method selection by preference and available signals, skip reasons. |
@@ -89,9 +88,27 @@ _Done 2026-10-15:_
 | `tests/makeSyntheticDPT.m` | Synthetic phase-leg generator with known truth, for measurement tests. |
 | `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`. |
 | `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
-| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`); formalized in Batch 7. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-15 — Open points worked through
+
+| # | Open point | Outcome |
+|---|---|---|
+| 1 | V_DS probe calibration | **Implemented:** opt-in zero-offset correction from the pre-pulse mean (step 6a), for currents and the non-active V_DS. On in the example script. Example: Iout −4.84 A, Id-LS −3.73 A, Vds-HS −1.42 V removed. The refusal limit is 5 % of scale; 2 % refused real offsets at low test current. |
+| 2 | V_DC calibration routine | **Implemented within the data model:** C is measured in collections with a Vdc channel or both V_DS (pre-pulse point + breaks, needs ≥ 3 points) and applied to the bucket's single-V_DS collections. Precedence: bucket C → cfg C → other fallbacks. Example bucket: C = 0.681 mF ± 4.4 %; the single copy is within 0.2 V of KVL at the last turn-off. |
+| 3 | Normalization limits | **Kept as they are.** The user wants current sensors handled agnostically, with no sensor-type input. |
+| 4 | Example device | **Confirmed:** SiC MOSFET (`cfg.deviceType = "MOSFET"`). |
+| 5 | Window margins | **Decided:** end-point searches go to the territory end (design §12.7), to be implemented in 5d. On the example, all end points are already 0.45–1.6 µs inside the window. |
+| 6 | `maxResidual` | **Stays open:** only one bucket, with one collection, is available. |
+| 7 | `clear` in the script | **Resolved:** steps 3–6c moved into `runPipeline(cfg, S)`. The result variable is `result`, so MATLAB's `run()` is not shadowed. |
+
+**Settings 0.8.0:** `S.zeroOffset.roles`, `S.zeroOffset.maxFraction`.
+
+**Bucket config:** `cfg.zeroOffsetCorrection.enable`.
+
+**Tests:** `tests/test_corrections.m`, 20 cases, all passing (zero offsets, refusals, ordering with normalization, bucket C, disagreement, example as a two-collection bucket). All suites pass.
 
 ### 2026-10-15 — Bus-voltage model V_DC(t) implemented
 
