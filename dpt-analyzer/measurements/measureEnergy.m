@@ -18,7 +18,9 @@ function r = measureEnergy(def, method, ctx, sig, S)
 %     EswNonActive (#9)   direct: integral of V_DS,N * I_D,N over the active
 %                         E window; indirect: E_io - E_on/E_off
 %     Pon, Poff (#10, 11) E / window length, or peak V_DS * I_D in the window
-%     Psw (#12)           cfg.switchingFrequency * E_sw
+%     Psw (#12)           cfg.switchingFrequency * E_sw, per switch, or
+%                         * (E_sw + E_rr) of the complementary diode at the
+%                         pair's turn-on (phase leg)
 %
 %   Composites evaluate their inputs through evaluateMeasurement, so they
 %   use exactly the methods selected for #5 and #6, and say so in the tag.
@@ -244,10 +246,25 @@ if es.status ~= "ok"
     r.reason = "E_sw: " + es.reason;
     return
 end
-r.value = ctx.cfg.switchingFrequency * es.value;
+E = es.value;
 r.methodTag = sprintf('%s, f_s = %.4g kHz, %s', r.methodTag, ctx.cfg.switchingFrequency / 1e3, es.methodTag);
 r.flags = es.flags;
 r.provenance.Esw = es.value;
+if method.id == "phaseLeg"
+    % E_rr of the same operating point: the diode recovers at the pair's
+    % turn-on (MEASUREMENT_SPEC.md row 12).
+    er = evaluateMeasurement(registryEntry("Err"), subContext(ctx, 2), S);
+    if er.status ~= "ok"
+        r.status = er.status;
+        r.reason = "E_rr: " + er.reason;
+        return
+    end
+    E = E + er.value;
+    r.methodTag = sprintf('%s, E_rr %s', r.methodTag, er.methodTag);
+    r.flags = unique([r.flags, er.flags], 'stable');
+    r.provenance.Err = er.value;
+end
+r.value = ctx.cfg.switchingFrequency * E;
 r.status = "ok";
 end
 

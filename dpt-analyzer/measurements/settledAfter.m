@@ -99,20 +99,3 @@ else
 end
 
 end
-
-% =====================================================================
-function y = localTrend(x, n)
-% Moving least-squares line over n samples (shrinking at the ends),
-% evaluated at each sample: the moving mean in the interior, corrected
-% by the local slope near the ends where the window is one-sided.
-k = (1:numel(x))';
-S0 = movsum(ones(size(x)), n);
-Sk = movsum(k, n);
-Sx = movsum(x, n);
-Skk = movsum(k.^2, n);
-Skx = movsum(k .* x, n);
-den = S0 .* Skk - Sk.^2;
-slope = (S0 .* Skx - Sk .* Sx) ./ den;
-slope(den == 0) = 0;
-y = Sx ./ S0 + slope .* (k - Sk ./ S0);
-end

@@ -33,7 +33,12 @@ function truth = makeSyntheticDPT(folder, opts)
 %   after each turn-off / to Id-LS after each turn-on switching instant),
 %   vgsBump ([amplitude, sigma]: Gaussian overshoot of Vgs-LS 3 tauGate
 %   after each turn-on), vgsNBump ([amplitude, sigma]: cross-talk on
-%   Vgs-HS, + at each LS turn-on and - at each turn-off switching instant).
+%   Vgs-HS, + at each LS turn-on and - at each turn-off switching instant),
+%   recovery ([amplitude, tRise, tFall, delay]: reverse-recovery current of
+%   the HS diode at each LS turn-on with forward current, a half-Gaussian
+%   rise (sigma tRise) and exponential decay (tFall) peaking delay after
+%   the switching instant; it flows through both devices, so Id-LS gains
+%   it, Id-HS = -(1 - s) I_L + h, and I_L is unchanged).
 
 if nargin < 2
     opts = struct();
@@ -107,8 +112,20 @@ for k = 1:numel(o.ons)
             exp(-0.5 * ((t - offs(k) - o.tdOff) / o.vgsNBump(2)).^2));
     end
 end
+hRR = zeros(size(t));
+if ~isempty(o.recovery)
+    for k = 1:numel(o.ons)
+        tc = o.ons(k) + o.tdOn + o.recovery(4);
+        if interp1(t, IL, o.ons(k)) > iOn          % only with forward diode current
+            u = t - tc;
+            h = exp(-0.5 * (u / o.recovery(2)).^2);
+            h(u >= 0) = exp(-u(u >= 0) / o.recovery(3));
+            hRR = hRR + o.recovery(1) * h;
+        end
+    end
+end
 vdsLS = vdsLS + ringV;
-id = id + ringI;
+id = id + ringI + hRR;
 vgs = vgs + bumpG;
 vgsHS = vgsHS + bumpN;
 
@@ -122,7 +139,7 @@ end
 
 signals = struct('name', {"Vgs-LS", "Vds-LS", "Id-LS", "Iout", "Vdc", "Vds-HS", "Vds-LS-clamp", "Vgs-HS", "Id-HS"}, ...
     'data', {vgs, vdsLS, idSensor, IL + o.ilOffset, vdc, o.vdsHSGain * vdsHS + o.vdsHSOffset, min(vdsLS, o.clampLevel), vgsHS, ...
-    -(1 - s) .* IL}, ...
+    -(1 - s) .* IL + hRR}, ...
     'units', {'V', 'V', 'A', 'A', 'V', 'V', 'V', 'V', 'A'});
 if ~isfolder(folder)
     mkdir(folder);
@@ -162,6 +179,8 @@ truth.vgs = vgs;
 truth.vgsHS = vgsHS;
 truth.ringV = ringV;
 truth.ringI = ringI;
+truth.hRR = hRR;
+truth.iF = (1 - s) .* IL - hRR;              % HS diode forward current
 % Gate instants (swing basis): tanh crossing of 10 % / 90 %.
 truth.g10 = o.ons - o.tauGate * atanh(0.8);
 truth.g90 = offs - o.tauGate * atanh(0.8);
@@ -200,6 +219,7 @@ d.ringV = [];                 % [A f tau] V_DS ringing after each turn-off
 d.ringI = [];                 % [A f tau] I_D ringing after each turn-on
 d.vgsBump = [];               % [A sigma] active gate overshoot
 d.vgsNBump = [];              % [A sigma] non-active gate cross-talk
+d.recovery = [];              % [A tRise tFall delay] HS diode reverse recovery
 for f = string(fieldnames(d))'
     if ~isfield(o, f)
         o.(f) = d.(f);

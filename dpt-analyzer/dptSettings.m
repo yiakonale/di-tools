@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.13.0";
+S.schemaVersion = "0.14.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -458,6 +458,16 @@ S.measurements.methods.VgsMax        = "preset";
 S.measurements.methods.VgsMin        = "preset";
 S.measurements.methods.VgsNMin       = "preset";
 S.measurements.methods.VgsNMax       = "preset";
+% Reverse recovery of the non-active device's diode (#39-46), at the
+% active device's turn-on: "preset" (IEC 60747-2 where it defines the
+% row), or explicit ids. t_a (#41) has one method; t_b (#42) inherits the
+% t_rr end point chosen here for #40.
+S.measurements.methods.Irrm          = "preset";
+S.measurements.methods.trr           = "preset";
+S.measurements.methods.Srr           = "preset";
+S.measurements.methods.Qrr           = "preset";
+S.measurements.methods.Err           = "preset";
+S.measurements.methods.didtRR        = "preset";
 
 % Method parameters.
 % onStateWindow "delayToEnd": delay after V_DS reaches 10 % at turn-on
@@ -536,6 +546,30 @@ S.measurements.params.stress.after90Window = 2;
 % instant (V_GS 90 % falling / 10 % rising).
 S.measurements.params.custom.VdsMax    = [];
 S.measurements.params.custom.IdMax     = [];
+
+% Reverse recovery (#39-46).
+% Derived diode current I_L - I_D (cfg.diodeCurrent.allowDerived) is
+% refused for an event whose mean conduction-phase mismatch exceeds this
+% fraction of its I_rrm (design Q5).
+S.measurements.params.recovery.derivedMismatch = 0.25;
+% "smoothed" I_rrm (#39): Savitzky-Golay order 2 over this fraction of
+% t_a (at least params.derivative.minSamples); the filter is stated.
+S.measurements.params.recovery.smoothFraction = 0.25;
+% Peak di/dt during t_b (#46): Savitzky-Golay derivative over this
+% fraction of t_b (at least params.derivative.minSamples).
+S.measurements.params.recovery.derivativeFraction = 0.25;
+% di_F/dt through the zero crossing (#46): line fit between I_F falling
+% through didtLevels(1)*I_F (forward) and -didtLevels(2)*I_rrm (reverse).
+S.measurements.params.recovery.didtLevels = [0.5 0.5];
+% Custom: t_rr end (#40) where the line through the recovering current at
+% -a*I_rrm and -b*I_rrm crosses zero, [a b] (e.g. [0.9 0.25] is IEC-2);
+% Q_rr / E_rr end (#44, #45) at a fraction of I_rrm on the recovering
+% slope, or a fixed duration [s] after the zero crossing; #46 average
+% slope between two diode-current levels [i1 i2] [A].
+S.measurements.params.custom.trrLevels        = [];
+S.measurements.params.custom.recoveryEnd      = [];
+S.measurements.params.custom.recoveryDuration = [];
+S.measurements.params.custom.didtRR           = [];
 
 %% Reporting ----------------------------------------------------------
 % Warnings are always collected in the results. This controls whether
@@ -771,6 +805,26 @@ mustBePositiveScalar(M.params.energy.fixedDuration, 'measurements.params.energy.
 mustBeNonnegativeScalar(M.params.Eio.settleDelay, 'measurements.params.Eio.settleDelay');
 mustBePositiveScalar(M.params.stress.after90Window, 'measurements.params.stress.after90Window');
 mustBePositiveScalar(M.common.tailNoiseRatio, 'measurements.common.tailNoiseRatio');
+mustBeFraction(M.params.recovery.derivedMismatch, 'measurements.params.recovery.derivedMismatch');
+mustBeFraction(M.params.recovery.smoothFraction, 'measurements.params.recovery.smoothFraction');
+mustBeFraction(M.params.recovery.derivativeFraction, 'measurements.params.recovery.derivativeFraction');
+L = M.params.recovery.didtLevels;
+if ~(isnumeric(L) && numel(L) == 2 && all(L > 0 & L < 1))
+    fail('measurements.params.recovery.didtLevels', 'must be two fractions in (0, 1).');
+end
+L = M.params.custom.trrLevels;
+if ~isempty(L) && ~(isnumeric(L) && numel(L) == 2 && all(L > 0 & L < 1) && L(1) > L(2))
+    fail('measurements.params.custom.trrLevels', 'must be [] or [a b] with 1 > a > b > 0.');
+end
+L = M.params.custom.recoveryEnd;
+if ~isempty(L) && ~(isnumeric(L) && isscalar(L) && L > 0 && L < 1)
+    fail('measurements.params.custom.recoveryEnd', 'must be [] or a fraction in (0, 1).');
+end
+mustBeEmptyOrPositiveScalar(M.params.custom.recoveryDuration, 'measurements.params.custom.recoveryDuration');
+L = M.params.custom.didtRR;
+if ~isempty(L) && ~(isnumeric(L) && numel(L) == 2 && all(isfinite(L)) && L(1) ~= L(2))
+    fail('measurements.params.custom.didtRR', 'must be [] or two different currents [A].');
+end
 
 % Reporting
 mustBeLogicalScalar(S.report.echoWarnings, 'report.echoWarnings');

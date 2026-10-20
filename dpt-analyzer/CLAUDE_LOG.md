@@ -11,7 +11,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | 5a–5f done (5f confirmed 2026-10-19); V_DS probe calibration added; **5g next**; 5h to go |
+| 5 | Measurement specification & registry | 5a–5g done (5g awaiting review); V_DS probe calibration added; **5h next** |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -29,15 +29,21 @@ _Last updated 2026-10-19. Every step is committed locally._
   - 5e: switching energy and power #5–12 (confirmed by the user 2026-10-19).
   - V_DS probe calibration (`normalizeVoltageSensors`), opt-in, 2026-10-19.
   - 5f: voltage, current and gate stress #29–38 (`measureStress`, design §16), confirmed 2026-10-19; one shared settling test `settledAfter` (§16.4).
-- Remaining in Batch 5: 5g reverse recovery (#39–46, plus P_sw phase-leg and #45 E_rr), 5h parasitics (#47, #48, #55).
+  - 5g: reverse recovery #39–46 and the phase-leg P_sw (`measureRecovery`, design §17), 2026-10-19, **awaiting the user's review**.
+- Remaining in Batch 5: 5h parasitics (#47, #48 optional Q_oss, #55).
 - `dpt_analyzer.m` only configures and calls `runPipeline(cfg, S)`, which runs workflow steps 3–6c: import → detection → alignment → timeline → zero-offset correction (opt-in, **on** in the example) → current normalization (opt-in) → bus-voltage model, using C measured in the bucket where possible. The summary states the offsets removed and the V_DC source per collection.
 - Measurements are implemented and tested but **not yet run by the entry script**; that is Batch 6 (`runMeasurements`).
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy; test_stress` (38 + 31 + 33 + 40 + 25 + 27 + 34 + 21 + 38 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy; test_stress; test_recovery` (38 + 31 + 33 + 40 + 25 + 27 + 34 + 21 + 38 + 36 cases, plus the settings checks).
 
-**Next step (pick up here): Batch 5g**, reverse recovery (#39–46, P_sw phase-leg, #45 E_rr). 5f was confirmed, and the shared settling rule `settledAfter` is applied to every measurement (design §16.4).
+**Next step (pick up here):** the user's review of 5g (design §17), with these open decisions:
+1. **E_rr window.** Both spec windows end at 2 % of I_rrm, which is not resolvable with the example's derived current, so E_rr and the phase-leg P_sw always fail there. Proposal: add a `[Conv]` window "zero crossing → t_rr end", mirroring the Q_rr option.
+2. **No fallback after a failed preset method.** The IEC-2 t_rr fails on the example (0.9 I_rrm is within the noise), and t_b, S, Q_rr and di/dt (t_b) fail with it. Options: keep it strict (the user picks JEDEC), or fall back to the next method when the failure is "within the noise floor", with a flag.
+3. **#46 "through the zero crossing"** is defined as a line fit between +50 % I_F and −50 % I_rrm. Confirm, or give the standard's levels.
+
+Then **Batch 5h**, parasitics (#47 L_loop, #48 optional Q_oss, #55 C_par). #48 would also separate Q_oss from the capacitive "Q_rr" (design §17.4).
 
 The bus-voltage plan below is kept for reference.
 
@@ -61,6 +67,7 @@ _Done 2026-10-15:_
 **Open points:**
 - **`S.alignment.maxResidual` is unset.** Only one bucket, with one collection, exists so far. Calibrate it once a real multi-collection bucket exists: its residuals will show the real shot-to-shot gate jitter.
 - **Example normalization offset:** b = +0.75 A remains after zero correction. It is below a fifth of one Iout ADC step and so unresolvable; noted only.
+- **I_D sensor at the highest currents (pulses 9–10):** dI_D,over collapses from 35 A to 4.6 A at pulse 10, and the derived diode current is refused there (design §17.4). Results that rely on I_D during that turn-on are unreliable, including E_io, stress and recovery. Check the probe's rating and bandwidth at 600 A.
 - **E_io at the pulse-10 turn-on** remains below its trend. New evidence (design §16.4): the I_D sensor recovers slowly after that highest-current turn-on, with Id-LS / Iout rising from 0.92 to 0.96 over the on-time against a flat 0.93–0.94 before. That points to the sensor rather than the analysis; check the probe's rating and its low-frequency response. With the V_DS calibration, the pair ratio E_io / E_sw is 1.052 against 1.12–1.17 elsewhere (1.009 without the calibration), so the probe mismatch explains part of it but not all. Worth a look at that waveform.
 
 **Working agreements:**
@@ -92,7 +99,7 @@ _Done 2026-10-15:_
 | `bucketCapacitance.m` | Combines the DC-link capacitance measured in the bucket's direct-source collections, for use in its other collections. |
 | `normalizeVoltageSensors.m` | Opt-in relative V_DS probe-gain calibration from the KVL jump across turn-offs; also reports the DC-link + busbar resistance (step 6b′). |
 | `normalizeCurrentSensors.m` | Opt-in I_D / I_L sensor calibration on the on-state segments (pipeline step 6b). |
-| `measurements/measurementRegistry.m` | Measurement and method definitions (slots, tags, implementations). Currently #1–38 and #49–54. |
+| `measurements/measurementRegistry.m` | Measurement and method definitions (slots, tags, implementations). Currently #1–46 and #49–54. |
 | `measurements/evaluateMeasurement.m` | Optional/device gating, method selection by preference and available signals, skip reasons. |
 | `measurements/eventContext.m`, `gateInstant.m`, `windowStats.m`, `resolveRole.m`, `makeResult.m`, `valueFlags.m`, `formatResult.m` | Framework helpers: event times in corrected time, V_GS p % instants, window statistics, role to signal, result skeleton, quality flags, tagged one-line output. |
 | `measurements/measureBusVoltage.m`, `measureSwitchingCurrent.m`, `measureConduction.m` | Implementations of #1–2, #3–4 and #49–54. |
@@ -100,13 +107,27 @@ _Done 2026-10-15:_
 | `measurements/measureInterval.m`, `measureSlew.m`, `measureDeadTime.m` | Timing #13–22, slew rates #24–28, dead time #23. |
 | `measurements/measureEnergy.m` | Switching energy and power #5–12 (windows, method sets, E_io, composites). |
 | `measurements/settledAfter.m` | The one settling test ("ringing has decayed"): band above the noise envelope, ringing-safe noise estimate, local trend for ramps (design §16.3–16.4). |
+| `measurements/measureRecovery.m` | Reverse recovery #39–46: diode current as a virtual channel (measured −I_D,N, or opt-in derived trend(I_L) − I_D with the Q5 check), I_rrm, t_rr (IEC-2/JEDEC/25 %/second zero), t_a, t_b, S, Q_rr, E_rr, di_F/dt. |
 | `measurements/measureStress.m` | Voltage, current and gate stress #29–38: peak windows until the ringing decays, over/undershoot references, ratings, cross-talk. |
 | `tests/makeSyntheticDPT.m` | Synthetic phase-leg generator with known truth, for measurement tests (optional V_DS/I_D ringing and gate bumps). |
-| `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`. |
+| `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`, `localTrend`. |
 | `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
-| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`, `test_energy`, `test_stress`); formalized in Batch 7. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`, `test_energy`, `test_stress`, `test_recovery`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-19 — Batch 5g: reverse recovery and the phase-leg P_sw
+
+- **Implemented** #39–46 (`measureRecovery`, design §17) and P_sw `phaseLeg` = f_s·(E_sw + E_rr).
+  - Presets use IEC 60747-2 where the spec defines it (#40, #44, #45); #39, #43 and #46 use their first `[Conv]` option.
+  - The IEC-2 S_rr is skipped as deferred.
+- **Diode current:**
+  - Measured −I_D,N is preferred. The derived I_L − I_D is opt-in through the new `cfg.diodeCurrent.allowDerived`.
+  - In the derived current, I_L is its local linear trend over D (new primitive `localTrend`). This halves the noise floor on the example.
+  - The Q5 check uses the largest smoothed conduction-phase mismatch rather than the mean, which catches a drifting sensor.
+- **Settings 0.14.0:** methods `Irrm`, `trr`, `Srr`, `Qrr`, `Err`, `didtRR`; `params.recovery.*`; custom recovery parameters.
+- **[data] Example:** I_rrm 27–46 A, JEDEC t_rr 28–42 ns, and Q_rr ≈ 640 nC independent of current (capacitive, so Q_oss dominates). dI_D,over agrees with I_rrm within 10 A. The IEC-2 t_rr and all 2 % end points are within the noise; pulse 10 is refused.
+- **Verified:** `tests/test_recovery.m` passes 36 cases, covering synthetic truth for every method, measured against derived current, Q5 refusal and acceptance, eligibility, P_sw phase-leg and example consistency. All suites pass, as does `dpt_analyzer.m`.
 
 ### 2026-10-19 — 5f confirmed; one settling test for all measurements
 

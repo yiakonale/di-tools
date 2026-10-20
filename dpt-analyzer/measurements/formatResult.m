@@ -32,8 +32,8 @@ end
 % =====================================================================
 function s = engineering(value, unit)
 % Value with an SI prefix, 4 significant digits.
-if ~isfinite(value) || value == 0
-    s = sprintf('%.4g %s', value, unit);
+if ~isfinite(value) || value == 0 || unit == ""
+    s = strtrim(sprintf('%.4g %s', value, unit));    % dimensionless: no prefix
     return
 end
 prefixes = ["p", "n", "u", "m", "", "k", "M", "G"];

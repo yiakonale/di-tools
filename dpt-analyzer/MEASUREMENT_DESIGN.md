@@ -850,3 +850,73 @@ Example (all corrections on; pulses 3 / 9):
 | V_GS,N,min / max | −7.8 / +0.4 V | −8.0 / +1.8 V |
 
 Capture: V_GS,max 17.8 V, V_GS,min −5.6 V. The I_D,max peak lies inside the switching core on all 10 pulses. With `VgsThMin` = 1.5 V, pulse 9's cross-talk +1.8 V is flagged `exceedsRating`.
+
+## 17. Batch 5g: reverse recovery and the phase-leg P_sw (2026-10-19)
+
+Implemented in `measurements/measureRecovery.m` (registry `addRecovery`); P_sw phase-leg in `measureEnergy`.
+
+### 17.1 Diode current
+
+The diode is the non-active device's body or antiparallel diode (§2.2). Its forward current I_F is built once per event as a virtual channel `diodeCurrent` in a copy of the collection, so every helper reads it like a measured signal (`getSignal`, `eventLevels`, `settledAfter`, `findCrossing`).
+
+| Source | I_F | Condition |
+|---|---|---|
+| measured (preferred) | −I_D of the non-active device | its channel is present |
+| derived | trend(I_L) − I_D,active | `cfg.diodeCurrent.allowDerived` (new, default false) |
+
+- **Smooth I_L.** The inductor current is continuous, and the recovery current circulates in the commutation loop without passing through it (§5.2). In the derived current, I_L is therefore replaced by its local linear trend over `averagingWindow`·D (`localTrend`, now a primitive). That removes the I_L sensor's noise; the bias at the slope change is ΔS·D/8 (≈ 0.1 A on the synthetic set, ≈ 0.6 A on the example). **[data]** On the example this halves the noise floor (3σ from 7–9 A to 3–4 A), because Iout has a 4 A ADC step.
+- **Q5 check, refined.** The derived current is refused when its largest conduction-phase value, smoothed over D, exceeds `params.recovery.derivedMismatch` (25 %) of I_rrm. The conduction phase runs from settling to the territory end. A mean would average out a drifting sensor: pulse 10 has a mean of −2.5 A but excursions of ±10–15 A.
+
+### 17.2 Common construction (every row)
+
+| Quantity | Definition |
+|---|---|
+| I_F0 | I_F at V_GS 10 % (own level fit). The event is **skipped** if I_F0 is within the noise floor (no forward current, no recovery; e.g. pulse 1). |
+| t0 | first falling zero crossing of I_F after V_GS 10 % |
+| recovery lobe | t0 until I_F first rises back above +3σ (or the settling time) |
+| I_rrm, tp | −min(I_F) over the lobe (raw), and its time |
+| levels p·I_rrm | resolvable only if min(p, 1 − p)·I_rrm ≥ 3σ (Q2); searched on the recovering slope from tp to the territory end (§12.7) |
+
+`ringingNotDecayed` is set when I_F does not settle within the territory.
+
+### 17.3 Rows
+
+| Row | Methods (preset first) |
+|---|---|
+| #39 I_rrm | `raw`; `smoothed` (Savitzky-Golay order 2 over `recovery.smoothFraction`·t_a; the filter is stated) |
+| #40 t_rr | `IEC2` (line through 0.9 and 0.25 I_rrm to zero); `JEDEC` (line through the peak and 0.25 I_rrm); `conv25` (direct 25 % crossing); `zero2` (second zero crossing); `custom` (`custom.trrLevels`) |
+| #41 t_a / #42 t_b | t0 → tp; tp → the t_rr end of the method chosen for #40 (in the tag) |
+| #43 S | `ratio` t_b/t_a; `IEC2` S_rr **skipped** as deferred (spec) |
+| #44 Q_rr | `IEC2` ∫−I_F from t0 to 2 % of I_rrm; `trrEnd` (to the #40 end); `triangle` t_rr·I_rrm/2; `custom` (`custom.recoveryEnd` fraction, or `custom.recoveryDuration`) |
+| #45 E_rr | ∫v_F·i_F with v_F = −V_DS,N (positive while it recovers): `IEC2` t0 → 2 % I_rrm; `vdc10` V_DS,N at 10 % of V_DC → 2 % I_rrm; `custom` |
+| #46 di_F/dt | `zeroCrossing`: slope of a line fit through I_F between +`didtLevels(1)`·I_F0 and −`didtLevels(2)`·I_rrm (0.5 / 0.5). `peakTb`: max \|di/dt\| over t_b (Savitzky-Golay, `recovery.derivativeFraction`·t_b). `custom` (`custom.didtRR` [A]). |
+| #12 P_sw | new method `phaseLeg`: f_s·(E_sw + E_rr), with E_rr at the pair's turn-on (same operating point) |
+
+I_rrm, Q_rr, E_rr and di_F/dt are magnitudes. The tag states the diode-current source (`I_F = -I_D,N` or `I_F = I_L - I_D`).
+
+### 17.4 [data] Results
+
+**Synthetic** (recovery hump 15 A, rise σ 3 ns, decay 6 ns; independent truth on the noise-free I_F):
+- Every method matches the truth to < 1e-12 s or < 1e-6 relative.
+- I_rrm = 13.92 A matches the analytic A − (1 − s)·I_L at the hump peak.
+- The derived current agrees with the measured one within 0.3 A / 0.3 ns.
+- A 10 % I_D gain error is refused (Q5), and accepted after current normalization.
+
+**Example** (derived; zero offset, current and V_DS normalization on). Values use the methods that resolve on this data: JEDEC t_rr, and Q_rr to the t_rr end.
+
+| Pulse | I_on [A] | I_rrm [A] | t_a [ns] | t_rr JEDEC [ns] | t_b [ns] | S | Q_rr [nC] | di_F/dt [A/ns] | dI_D,over [A] |
+|---|---|---|---|---|---|---|---|---|---|
+| 2 | 69 | 27.4 | 9.9 | 41.6 | 31.7 | 3.20 | 610 | 2.89 | 29.7 |
+| 3 | 138 | 27.1 | 21.6 | 35.0 | 13.5 | 0.63 | 637 | 4.05 | 26.1 |
+| 4 | 205 | 32.7 | 22.2 | 33.0 | 10.8 | 0.49 | 649 | 4.89 | 31.0 |
+| 5 | 271 | 37.4 | 22.2 | 32.8 | 10.7 | 0.48 | 643 | 4.69 | 39.0 |
+| 6 | 335 | 41.1 | 21.2 | 31.7 | 10.5 | 0.50 | 652 | 4.88 | 40.2 |
+| 7 | 399 | 43.8 | 20.7 | 31.7 | 11.0 | 0.53 | 643 | 5.31 | 45.6 |
+| 8 | 460 | 46.2 | 20.5 | 31.0 | 10.5 | 0.51 | 638 | 5.67 | 45.3 |
+| 9 | 522 | 33.7 | 15.5 | 28.5 | 13.0 | 0.84 | 432 | 6.09 | 35.3 |
+| 10 | 580 | refused (Q5) | | | | | | | 4.6 |
+
+- **The spec's built-in check holds:** dI_D,over agrees with I_rrm within 10 A on pulses 2–9.
+- **Q_rr ≈ 640 nC, independent of current** (pulses 2–8). The charge is capacitive: for this SiC MOSFET, "Q_rr" is mostly the non-active device's Q_oss, not minority-carrier charge. Separating the two needs Q_oss (#48, 5h).
+- **Pulses 9–10.** I_rrm and Q_rr drop at pulse 9, and at pulse 10 dI_D,over collapses to 4.6 A and the derived current is refused. The I_D sensor stops following the turn-on transient at the highest currents (§16.4), so the pulse 9–10 stress and recovery values on I_D are not reliable.
+- **Not resolvable here:** IEC-2 t_rr (the 0.9 I_rrm point is about 2.7 A from the peak, against a 3.1–4 A floor) and every 2 % end point (about 0.6 A). So Q_rr IEC-2, E_rr (both spec windows) and the phase-leg P_sw fail with that reason. With a probe on the non-active device the floor would be that probe's noise alone.

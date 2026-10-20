@@ -50,6 +50,13 @@ cfg.currentNormalization.reference = "Iout";   % "Iout" | "Id"
 cfg.voltageNormalization.enable    = false;
 cfg.voltageNormalization.reference = "active";  % "active" | "nonActive"
 
+% Optional: reverse recovery (#39-46) needs the diode current. Without a
+% probe on the non-active device, it can be derived as I_L - I_D of the
+% active device. That is only as good as the two sensors agree, so it is
+% opt-in, best with current normalization on, and refused for any pulse
+% whose conduction-phase mismatch exceeds 25 % of its I_rrm.
+cfg.diodeCurrent.allowDerived = false;
+
 % Optional: device ratings. A measured peak beyond one is flagged
 % "exceedsRating". VgsThMin is the lowest V_GS(th) at the highest T_j,
 % the limit for gate cross-talk on the non-active device.

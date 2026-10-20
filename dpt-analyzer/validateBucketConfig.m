@@ -20,6 +20,7 @@ function cfg = validateBucketConfig(cfg, S, baseDir)
 %     cfg.voltageNormalization.enable        false
 %     cfg.voltageNormalization.reference     "active" ("active" | "nonActive")
 %     cfg.ratings.VdsMax, VgsMax, VgsMin, VgsThMin   [] (device ratings [V])
+%     cfg.diodeCurrent.allowDerived          false (diode current I_L - I_D)
 
 arguments
     cfg (1,1) struct
@@ -29,7 +30,7 @@ end
 
 checkFields(cfg, ["bucketPath", "activeDevice", "deviceType", "expectedPulseCount", "gate"], ...
     "cfg", ["nominal", "currentNormalization", "circuit", "zeroOffsetCorrection", ...
-    "switchingFrequency", "voltageNormalization", "ratings"]);
+    "switchingFrequency", "voltageNormalization", "ratings", "diodeCurrent"]);
 checkFields(cfg.gate, "nominal", "cfg.gate");
 checkFields(cfg.gate.nominal, ["high", "low"], "cfg.gate.nominal");
 
@@ -194,6 +195,20 @@ for f = ratingFields
 end
 if ~isempty(cfg.ratings.VgsMin) && cfg.ratings.VgsMin >= 0
     error('dpt:config:invalidValue', 'cfg.ratings.VgsMin is the negative gate limit and must be < 0.');
+end
+
+% Diode current for reverse recovery (#39-46): the non-active device's
+% measured I_D, or, opt-in, I_L - I_D of the active device (design 2.2,
+% Q5; refused per event if the two disagree in conduction).
+if ~isfield(cfg, 'diodeCurrent')
+    cfg.diodeCurrent = struct();
+end
+checkFields(cfg.diodeCurrent, strings(1, 0), "cfg.diodeCurrent", "allowDerived");
+if ~isfield(cfg.diodeCurrent, 'allowDerived')
+    cfg.diodeCurrent.allowDerived = false;
+end
+if ~(islogical(cfg.diodeCurrent.allowDerived) && isscalar(cfg.diodeCurrent.allowDerived))
+    error('dpt:config:invalidValue', 'cfg.diodeCurrent.allowDerived must be true or false.');
 end
 
 % Switching frequency of the application (optional), for the average
