@@ -811,14 +811,28 @@ A window that ends at the territory rather than because the signal settled is fl
 `settlingTime` gives the last exit from a band, so the band must lie above the noise envelope, or a single noise excursion decides the result. Three findings on the example and in the synthetic tests:
 
 1. **The floor is σ·√(2 ln N), not 3σ.** 3σ is exceeded by noise alone in 0.27 % of samples, so a last-exit test over N ≈ 17 000 samples always finds a late excursion. At pulse 3 (I_on 137 A, 2 % band 2.7 A, on-state σ 1.1 A) the I_D window ran to 3.1 µs, and "I_D,max" was the end of the ramp (171.5 A instead of the 165 A recovery peak). With k = max(3, √(2 ln N)) ≈ 4.4 it settles at the core end. Pulses where 2 % exceeds the noise are unchanged.
-2. **σ comes from the tail, unless the tail still rings.** The on-state current sensor is noisier (1.1–1.6 A) than at 0 A, where the signal sits on one or two ADC codes (σ = q/√12 = 0.62 A), so the pre-switching σ is too small. But the MAD of undecayed ringing (≈ 0.74 of its amplitude) would inflate a tail σ until the ringing passed as settled. Rule: use the tail σ unless it exceeds `params.stress.tailNoiseRatio` (3) times the quiet pre-switching noise, max(σ, q); then use the pre-switching σ. A difference-based noise estimate does not work: the noise is band-limited (consecutive samples share a code).
+2. **σ comes from the tail, unless the tail still rings.** The on-state current sensor is noisier (1.1–1.6 A) than at 0 A, where the signal sits on one or two ADC codes (σ = q/√12 = 0.62 A), so the pre-switching σ is too small. But the MAD of undecayed ringing (≈ 0.74 of its amplitude) would inflate a tail σ until the ringing passed as settled. Rule: use the tail σ unless it exceeds `common.tailNoiseRatio` (3) times the quiet pre-switching noise, max(σ, q); then use the pre-switching σ. A difference-based noise estimate does not work: the noise is band-limited (consecutive samples share a code).
 3. **The ramp trend is local.** A ramping current is compared with a moving least-squares line over `averagingWindow`·D (~25 ringing periods at 50 MHz, D ≈ 0.5 µs), not one line through the tail extrapolated microseconds back, which left a −1.75 A curvature residual near the edge.
 
 Smoothing before the test was rejected: the ringing is at 45–50 MHz (20 ns), so any window long enough to suppress the correlated noise suppresses the ringing too.
 
-These rules live in `measureStress`. The other users of `settlingTime` (#1/#2 settled V_DS, I_on extrapolated, conduction, E_io) still use the plain 2 % band. They are unaffected where 2 % exceeds the noise. **[data] Open point:** the non-default I_on method `extrapolatedId` fails at pulses 1–2 ("does not settle within ±0.04 / ±1.3 A of its trend"). At pulses 3, 4 and 10 it settles at 3.1 / 2.1 / 1.5 µs (pulses 5–9: 0.56–0.59 µs), so its fit window sits near the territory end. Recommendation: move the §16.3 rule into one shared helper used by every settling test.
+### 16.4 One settling test for every measurement (`settledAfter`, user decision 2026-10-19)
 
-### 16.4 [data] Results
+The rules above are in `measurements/settledAfter.m`, the only caller of the `settlingTime` primitive. Its users are #1/#2 `settledVds`, I_on `extrapolatedId` (trend), the conduction windows `delayToEnd` and the break window, E_io, and the stress windows.
+- The level and noise come from [core end, territory end]. The search can start later: conduction searches from the V_DS 10 % crossing.
+- The band amplitude is the transition of the signal's own levels (`eventLevels`) everywhere. Before, some callers used |settled − median before the window| and I_on used |I at the gate instant|.
+
+**[data] Effect on the example** (all corrections on; every row on all pulses):
+
+| Result | Change |
+|---|---|
+| V_DC,off `settledVds`, V_F, E_io (both), V_DS,max, I_D,max | none (0.000 %) |
+| I_on `extrapolatedId` | pulses 1–2 now succeed (they failed before). Pulses 3 / 4 / 10 change by −5.7 / −1.2 / +0.7 %, settling at 0.54 / 0.55 / 0.59 µs instead of 3.1 / 2.1 / 1.5 µs. It now agrees with I_L at V_GS 10 % to −1.8 … −2.7 A on pulses 2–9 |
+| V_DS(on) `delayToEnd`, pulse 1 | +59 → −24 mV. Both values are flagged `belowNoiseFloor`; the window now starts at the true settling time (498 ns) |
+
+**[data] Pulse 10 (the open E_io point).** Extrapolated I_on is +8.7 A above I_L there, because the I_D ramp is distorted: Id-LS / Iout rises from 0.92 to 0.96 over the on-time, against a flat 0.93–0.94 on pulses 8–9. The I_D sensor recovers slowly after the highest-current turn-on, which also lowers E_io at that turn-on, since E_io integrates I_D. There is no ADC clipping: the 37 samples at the Id-LS maximum span one 2 A step at the top of the ramp.
+
+### 16.5 [data] Results
 
 Synthetic truth: V_DS ringing 60 V / 50 MHz / τ 40 ns, I_D ringing 20 A, gate bumps 3 V (active) and ±6 V (cross-talk). Peaks match truth to 0.05; over/undershoots to 0.3 V / 0.3 A; the busModel reference differs from ownLevel by V_F; ratings flag on both sides; τ = 3 µs is flagged `ringingNotDecayed` with the window at the territory end.
 

@@ -84,20 +84,12 @@ if ~st.complete
     r.reason = "the territory after the turn-on is too short or outside the record";
     return
 end
-tail = ceil((1 - C.settledPortion) * st.n):st.n;
-trend = [st.t(tail), ones(numel(tail), 1)] \ st.x(tail);
-reference = trend(1) * g.time + trend(2);
-band = C.settlingBand * abs(reference);
-if band == 0
-    r.reason = "the settled current trend is zero at the gate instant";
+sa = settledAfter(ctx, e, sig.I, S, trend=true);
+if ~sa.settled
+    r.reason = sprintf('I_D does not settle to within +/- %.3g A of its trend', sa.band);
     return
 end
-residual = st.x - (trend(1) * st.t + trend(2));
-[ts, si] = settlingTime(st.t, residual, 0, band);
-if ~si.settled
-    r.reason = sprintf('I_D does not settle to within +/- %.3g A of its trend', band);
-    return
-end
+ts = sa.time;
 fitRange = [ts, min(ts + C.extrapolationFit * e.D, e.territory(2))];
 fitSt = windowStats(ctx, sig.I, fitRange, S);
 if ~fitSt.complete

@@ -160,19 +160,12 @@ if isnan(bv.value)
 end
 
 % End: V_DS of the non-active device settled after the last edge.
-vn = getSignal(ctx.col, sig.VN, [eEnd.core(2), eEnd.territory(2)], S);
-if numel(vn.x) < 3
-    r.reason = "the territory after the edge is too short";
-    return
-end
-before = getSignal(ctx.col, sig.VN, [eEnd.territory(1), eEnd.window(1)], S);
-settled = median(vn.x(ceil((1 - C.settledPortion) * numel(vn.x)):end));
-band = C.settlingBand * abs(settled - median(before.x));
-[ts, si] = settlingTime(vn.t, vn.x, settled, band);
-if ~si.settled
+sa = settledAfter(ctx, eEnd, sig.VN, S);
+if ~sa.settled
     r.reason = "V_DS of the non-active device does not settle within the territory";
     return
 end
+ts = sa.time;
 t1 = ts + S.measurements.params.Eio.settleDelay;
 if t1 > eEnd.territory(2)
     r.reason = "the settling delay runs past the territory";

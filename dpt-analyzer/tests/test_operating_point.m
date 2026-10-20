@@ -204,6 +204,24 @@ fprintf('      example I_on(k+1) - I_off(k): %s A\n', sprintf('%.2f ', gap));
 check(all(abs(gap) < 4), 'example: current changes < 4 A across each pulse break');
 r = run("Ion", colX, evX, alX, tlX, cfgX, P.turnOnEdge(1), "turnOn");
 check(any(r.flags == "belowNoiseFloor"), sprintf('example pulse 1 turn-on flagged: %s', formatResult(r)));
+% Extrapolated I_D settles above the noise (settledAfter, design 16.3): it
+% used to fail at pulses 1-2 and settle microseconds late at 3, 4 and 10.
+Sx = dptSettings(struct('report', struct('echoWarnings', false), 'measurements', ...
+    struct('methods', struct('Ion', "extrapolatedId"))));
+dev = zeros(1, height(P));
+dA = zeros(1, height(P));
+okAll = true;
+for p = 1:height(P)
+    rx = run("Ion", colX, evX, alX, tlX, cfgX, P.turnOnEdge(p), "turnOn", Sx);
+    rd = run("Ion", colX, evX, alX, tlX, cfgX, P.turnOnEdge(p), "turnOn");
+    okAll = okAll && rx.status == "ok";
+    dev(p) = 100 * (rx.value - rd.value) / rd.value;
+    dA(p) = rx.value - rd.value;
+end
+% Without zero-offset correction Id-LS keeps its -3.7 A probe offset, so
+% the low-current pulses differ by a few amperes.
+check(okAll && all(abs(dev(2:end)) < 3 | abs(dA(2:end)) < 4), sprintf(['example: extrapolated I_D ok on every ' ...
+    'pulse, within 3 %% or 4 A of I_L at V_GS 10 %% from pulse 2 (%s %%)'], sprintf('%+.1f ', dev(2:end))));
 r = run("VdsOn", colX, evX, alX, tlX, cfgX, [P.turnOnEdge(9), P.turnOffEdge(9)], "pulse");
 check(any(r.flags == "resolutionLimited"), sprintf('example V_DS(on) on the 2.8 V-step channel flagged: %s', formatResult(r)));
 r = run("PcondDevice", colX, evX, alX, tlX, cfgX, [P.turnOnEdge(9), P.turnOffEdge(9)], "pulse");

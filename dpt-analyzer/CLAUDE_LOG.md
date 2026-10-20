@@ -11,7 +11,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | 5a–5f done (5f awaiting review); V_DS probe calibration added; **5g next**; 5h to go |
+| 5 | Measurement specification & registry | 5a–5f done (5f confirmed 2026-10-19); V_DS probe calibration added; **5g next**; 5h to go |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -28,21 +28,16 @@ _Last updated 2026-10-19. Every step is committed locally._
   - 5d: timing #13–23, slew rates #24–28, IEC presets (confirmed by the user 2026-10-15);
   - 5e: switching energy and power #5–12 (confirmed by the user 2026-10-19).
   - V_DS probe calibration (`normalizeVoltageSensors`), opt-in, 2026-10-19.
-  - 5f: voltage, current and gate stress #29–38 (`measureStress`, design §16), 2026-10-19, **awaiting the user's review**.
+  - 5f: voltage, current and gate stress #29–38 (`measureStress`, design §16), confirmed 2026-10-19; one shared settling test `settledAfter` (§16.4).
 - Remaining in Batch 5: 5g reverse recovery (#39–46, plus P_sw phase-leg and #45 E_rr), 5h parasitics (#47, #48, #55).
 - `dpt_analyzer.m` only configures and calls `runPipeline(cfg, S)`, which runs workflow steps 3–6c: import → detection → alignment → timeline → zero-offset correction (opt-in, **on** in the example) → current normalization (opt-in) → bus-voltage model, using C measured in the bucket where possible. The summary states the offsets removed and the V_DC source per collection.
 - Measurements are implemented and tested but **not yet run by the entry script**; that is Batch 6 (`runMeasurements`).
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy; test_stress` (38 + 31 + 33 + 39 + 25 + 27 + 34 + 21 + 38 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy; test_stress` (38 + 31 + 33 + 40 + 25 + 27 + 34 + 21 + 38 cases, plus the settings checks).
 
-**Next step (pick up here):** the user's review of 5f (design §16), in particular:
-- the three settling-rule refinements of §16.3;
-- the refusal of non-`ownLevel` references for the turn-off current undershoot (§16.2);
-- whether to apply the §16.3 rule to every settling test (open point below).
-
-Then **Batch 5g**, reverse recovery (#39–46, P_sw phase-leg, #45 E_rr).
+**Next step (pick up here): Batch 5g**, reverse recovery (#39–46, P_sw phase-leg, #45 E_rr). 5f was confirmed, and the shared settling rule `settledAfter` is applied to every measurement (design §16.4).
 
 The bus-voltage plan below is kept for reference.
 
@@ -66,8 +61,7 @@ _Done 2026-10-15:_
 **Open points:**
 - **`S.alignment.maxResidual` is unset.** Only one bucket, with one collection, exists so far. Calibrate it once a real multi-collection bucket exists: its residuals will show the real shot-to-shot gate jitter.
 - **Example normalization offset:** b = +0.75 A remains after zero correction. It is below a fifth of one Iout ADC step and so unresolvable; noted only.
-- **Settling tests outside 5f** (#1/#2 settled V_DS, I_on `extrapolatedId`, conduction, E_io) use the plain 2 % band without the noise floor of design §16.3. The non-default `extrapolatedId` fails at example pulses 1–2 and settles 1.5–3.1 µs late at pulses 3, 4 and 10. The proposal is to move the §16.3 rule into one shared helper; this needs the user's go-ahead, because it changes 5c results.
-- **E_io at the pulse-10 turn-on** remains below its trend. With the V_DS calibration, the pair ratio E_io / E_sw is 1.052 against 1.12–1.17 elsewhere (1.009 without the calibration), so the probe mismatch explains part of it but not all. Worth a look at that waveform.
+- **E_io at the pulse-10 turn-on** remains below its trend. New evidence (design §16.4): the I_D sensor recovers slowly after that highest-current turn-on, with Id-LS / Iout rising from 0.92 to 0.96 over the on-time against a flat 0.93–0.94 before. That points to the sensor rather than the analysis; check the probe's rating and its low-frequency response. With the V_DS calibration, the pair ratio E_io / E_sw is 1.052 against 1.12–1.17 elsewhere (1.009 without the calibration), so the probe mismatch explains part of it but not all. Worth a look at that waveform.
 
 **Working agreements:**
 - Commit locally after every step. Stage only `dpt-analyzer/` paths: the parent `di/` repo has unrelated modified `.mlx` files.
@@ -105,6 +99,7 @@ _Done 2026-10-15:_
 | `measurements/eventLevels.m`, `resolveThreshold.m` | Level model (the signal's own pre/post levels at the gate instant, or at an optional `tEval`) and declarative threshold resolution (5d). |
 | `measurements/measureInterval.m`, `measureSlew.m`, `measureDeadTime.m` | Timing #13–22, slew rates #24–28, dead time #23. |
 | `measurements/measureEnergy.m` | Switching energy and power #5–12 (windows, method sets, E_io, composites). |
+| `measurements/settledAfter.m` | The one settling test ("ringing has decayed"): band above the noise envelope, ringing-safe noise estimate, local trend for ramps (design §16.3–16.4). |
 | `measurements/measureStress.m` | Voltage, current and gate stress #29–38: peak windows until the ringing decays, over/undershoot references, ratings, cross-talk. |
 | `tests/makeSyntheticDPT.m` | Synthetic phase-leg generator with known truth, for measurement tests (optional V_DS/I_D ringing and gate bumps). |
 | `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`. |
@@ -112,6 +107,16 @@ _Done 2026-10-15:_
 | `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`, `test_energy`, `test_stress`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-19 — 5f confirmed; one settling test for all measurements
+
+- **The user agreed** to apply the §16.3 rule everywhere. `settledAfter` is now the only caller of `settlingTime`. `tailNoiseRatio` moved to `S.measurements.common` (settings 0.13.0).
+- **Effect** (design §16.4):
+  - No change to V_DC,off, V_F, E_io, V_DS,max or I_D,max.
+  - I_on `extrapolatedId` now works at pulses 1–2 and settles at about 0.55 µs instead of 1.5–3.1 µs.
+  - V_DS(on) `delayToEnd` changes only at pulse 1, which stays flagged `belowNoiseFloor`.
+- **Pulse-10 finding:** the I_D sensor recovers slowly after the highest-current turn-on, so the low E_io there is likely a sensor effect. It is logged as data, not corrected.
+- **Tests:** `test_operating_point` has 40 cases (new: extrapolated I_on works on every pulse and agrees within 3 % or 4 A). All suites pass.
 
 ### 2026-10-19 — Batch 5f: voltage, current and gate stress
 

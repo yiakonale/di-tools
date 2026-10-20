@@ -286,77 +286,15 @@ end
 end
 
 function [ts, settled] = settledEnd(ctx, e, name, trend, S)
-% End of the ringing: the signal stays within settlingBand of its settled
-% level (or of its linear trend, for a ramping current) until the end of
-% the territory. Falls back to the territory end when it never settles.
-C = S.measurements.common;
-s = getSignal(ctx.col, name, [e.core(2), e.territory(2)], S);
-ts = e.territory(2);
-settled = false;
-if numel(s.x) < 3
-    return
-end
-tail = ceil((1 - C.settledPortion) * numel(s.x)):numel(s.x);
-if trend
-    % Local linear trend over averagingWindow*D: it follows the slow
-    % curvature of a real inductor ramp (one line through the tail,
-    % extrapolated microseconds back, does not), but not the ringing,
-    % whose period is a small fraction of D.
-    n = max(3, round(C.averagingWindow * e.D / median(diff(s.t))));
-    y = s.x - localTrend(s.x, n);
-    level = 0;
+% End of the ringing (settledAfter; a ramping current settles on its local
+% trend). Falls back to the territory end when it never settles.
+st = settledAfter(ctx, e, name, S, trend=trend);
+settled = st.settled;
+if settled
+    ts = st.time;
 else
-    y = s.x;
-    level = median(s.x(tail));
+    ts = e.territory(2);
 end
-lv = eventLevels(ctx, e, name, S);
-% The band is never narrower than the noise: at low current 2 % of the
-% transition is within the noise, and a single noise excursion would
-% postpone "settled" to the end of a ramp. The test is a LAST exit over N
-% samples, so the floor is the expected maximum of N Gaussian noise
-% samples, sigma*sqrt(2 ln N) (about 4.4 sigma for 17k samples), not the
-% per-sample 3 sigma that noise alone exceeds 0.27 % of the time.
-% sigma is the tail's noise (the noise of the state after the edge; a
-% current sensor is noisier in conduction than at 0 A), unless it is more
-% than tailNoiseRatio times the quiet pre-switching noise (max of sigma
-% and the ADC step, since a quiet quantized segment sits on one code):
-% then the tail still rings, its MAD (~0.74 of a sine's amplitude) is not
-% noise, and the pre-switching sigma is used, so the ringing is flagged.
-k = max(C.noiseFloorMultiple, sqrt(2 * log(numel(y))));
-sigma = noiseLevel(y(tail));
-g = gateTime(ctx, e, S);
-pre = windowStats(ctx, name, [g - C.averagingWindow * e.D, g], S);
-if pre.complete
-    quiet = max(pre.sigma, pre.quantStep);
-    if sigma > S.measurements.params.stress.tailNoiseRatio * quiet
-        sigma = pre.sigma;
-    end
-end
-band = max(C.settlingBand * lv.amplitude, k * sigma);
-if ~(band > 0)
-    return
-end
-[t, info] = settlingTime(s.t, y, level, band);
-if info.settled
-    ts = t;
-    settled = true;
-end
-end
-
-function y = localTrend(x, n)
-% Moving least-squares line over n samples (shrinking at the ends),
-% evaluated at each sample: the moving mean in the interior, corrected
-% by the local slope near the ends where the window is one-sided.
-k = (1:numel(x))';
-S0 = movsum(ones(size(x)), n);
-Sk = movsum(k, n);
-Sx = movsum(x, n);
-Skk = movsum(k.^2, n);
-Skx = movsum(k .* x, n);
-den = S0 .* Skk - Sk.^2;
-slope = (S0 .* Skx - Sk .* Sx) ./ den;
-slope(den == 0) = 0;
-y = Sx ./ S0 + slope .* (k - Sk ./ S0);
 end
 
 function def = registryEntry(id)

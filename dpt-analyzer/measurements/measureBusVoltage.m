@@ -76,21 +76,13 @@ switch method.id
         r.provenance.window = range - e.time;
 
     case "settledVds"
-        after = windowStats(ctx, sig.V, [e.core(2), e.territory(2)], S);
-        before = windowStats(ctx, sig.V, [e.territory(1), e.window(1)], S);
-        if ~(after.complete && before.complete)
-            r.reason = "the territory around the edge is too short or outside the record";
+        sa = settledAfter(ctx, e, sig.V, S);
+        if ~sa.settled
+            r.reason = sa.reason;
             return
         end
-        tail = after.x(ceil((1 - C.settledPortion) * after.n):end);
-        settled = median(tail);
-        band = C.settlingBand * abs(settled - before.median);
-        [ts, si] = settlingTime(after.t, after.x, settled, band);
-        if ~si.settled
-            r.reason = sprintf(['V_DS does not settle to within +/- %.3g V of %.4g V ' ...
-                'before the territory ends'], band, settled);
-            return
-        end
+        ts = sa.time;
+        band = sa.band;
         st = windowStats(ctx, sig.V, [ts, e.territory(2)], S);
         r.value = st.mean;
         r.provenance.settlingTime = ts - e.time;

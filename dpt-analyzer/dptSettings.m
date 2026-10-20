@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.12.0";
+S.schemaVersion = "0.13.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -354,8 +354,14 @@ S.windows.onInsufficientCoverage = "skip";
 % to a level of the same signal is not resolvable.
 S.measurements.common.noiseFloorMultiple = 3;
 % Ringing has decayed when the signal stays within +/- settlingBand of
-% its settled level, as a fraction of the transition amplitude (Q6).
+% its settled level, as a fraction of the transition amplitude (Q6), but
+% never within the noise (settledAfter, design 16.3).
 S.measurements.common.settlingBand = 0.02;
+% Noise floor of the settling band: the noise of the territory's tail,
+% unless it is more than this many times the quiet pre-switching noise
+% (max of sigma and the ADC step); then the tail still rings, and the
+% pre-switching noise is used instead.
+S.measurements.common.tailNoiseRatio = 3;
 % Settled level = median of this final fraction of the territory (Q6).
 S.measurements.common.settledPortion = 0.25;
 % "User windows" ending at a gate instant (#1-4, #49), in D (Q6).
@@ -526,12 +532,6 @@ S.measurements.params.Eio.settleDelay = 0;
 
 % V_DS,max (#29) "after90": window length after V_DS reaches 90 %, in D.
 S.measurements.params.stress.after90Window = 2;
-% "Ringing decayed" (#29-38): the settling band is never narrower than the
-% noise, taken from the territory's tail. A tail noise more than this
-% many times the quiet pre-switching noise (max of sigma and the ADC
-% step) is taken as ringing that has not decayed, not as noise, and the
-% pre-switching noise is used instead.
-S.measurements.params.stress.tailNoiseRatio = 3;
 % Custom peak windows (#29, #32): [t0 t1] [s] relative to the gate
 % instant (V_GS 90 % falling / 10 % rising).
 S.measurements.params.custom.VdsMax    = [];
@@ -770,7 +770,7 @@ mustBeEmptyOrPositiveScalar(M.params.derivative.windowDuration, 'measurements.pa
 mustBePositiveScalar(M.params.energy.fixedDuration, 'measurements.params.energy.fixedDuration');
 mustBeNonnegativeScalar(M.params.Eio.settleDelay, 'measurements.params.Eio.settleDelay');
 mustBePositiveScalar(M.params.stress.after90Window, 'measurements.params.stress.after90Window');
-mustBePositiveScalar(M.params.stress.tailNoiseRatio, 'measurements.params.stress.tailNoiseRatio');
+mustBePositiveScalar(M.common.tailNoiseRatio, 'measurements.common.tailNoiseRatio');
 
 % Reporting
 mustBeLogicalScalar(S.report.echoWarnings, 'report.echoWarnings');

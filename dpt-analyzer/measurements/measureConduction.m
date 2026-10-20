@@ -227,13 +227,12 @@ switch windowMethod
         t10 = c10.time;
         delay = S.measurements.params.onStateWindow.delay;
         if isempty(delay)
-            band = C.settlingBand * abs(pre - post);
-            [ts, si] = settlingTime(v.t, v.x, post, band, [t10, on.territory(2)]);
-            if ~si.settled
+            sa = settledAfter(ctx, on, vName, S, start=t10);
+            if ~sa.settled
                 why = "V_DS does not settle after the turn-on within its territory";
                 return
             end
-            start = ts;
+            start = sa.time;
         else
             start = t10 + delay;
         end
@@ -251,19 +250,12 @@ off = ctx.edges(1);
 on = ctx.edges(2);
 range = [NaN NaN];
 why = "";
-before = windowStats(ctx, sig.Vref, [off.territory(1), off.window(1)], S);
-after = windowStats(ctx, sig.Vref, [off.core(2), off.territory(2)], S);
-if ~(before.complete && after.complete)
-    why = "the turn-off territory is too short or outside the record";
-    return
-end
-settled = median(after.x(ceil((1 - C.settledPortion) * after.n):end));
-band = C.settlingBand * abs(before.median - settled);
-[ts, si] = settlingTime(after.t, after.x, settled, band);
-if ~si.settled
+sa = settledAfter(ctx, off, sig.Vref, S);
+if ~sa.settled
     why = "the non-active V_DS does not settle after the turn-off within its territory";
     return
 end
+ts = sa.time;
 g10 = gateInstant(ctx, on, 0.1, S);
 if ~g10.found
     why = g10.reason;
