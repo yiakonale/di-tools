@@ -38,7 +38,17 @@ _Last updated 2026-10-20. Every step is committed locally; the user pushes._
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
 - Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy; test_stress; test_recovery` (38 + 31 + 33 + 40 + 25 + 27 + 34 + 22 + 38 + 42 cases, plus the settings checks).
 
-**Next step (pick up here): Batch 5h**, parasitics (#47 L_loop, #48 optional Q_oss, #55 C_par). #48 would also separate Q_oss from the capacitive "Q_rr" (design §17.4). 5g was confirmed with the three decisions of design §17.5.
+**State: paused after 5g at the user's request (2026-10-20).** 5g was confirmed with the three decisions of design §17.5. **5h** (parasitics: #47 L_loop, #48 optional Q_oss, #55 C_par) is **on hold** until the user says to resume; no 5h code exists yet.
+
+_5h design notes (not started, to be reviewed with the user before coding):_
+- **Event-specific methods.** A new method field `events` checked in `available()`. #47's dip applies at turn-on; overshoot and ringing apply at turn-off.
+- **Cross-event context.** `ctx` would also carry `al`/`tl`, so #55 LC at a turn-off can take L from the dip at the same pulse's turn-on.
+- **#47 dip.** L = ∫(V_DS,pre − V_DS)dt / ΔI_D over I_D 10–90 %. The reference is V_DS's own pre-level (V_DC + V_F) rather than the spec's V_DC; that choice is for the user. The integral form avoids differentiating noise.
+- **#47 overshoot.** dV_DS,over (#30) / the turn-off di/dt (#25), flagged as including capacitive charging.
+- **#47 ringing.** Uses `ringingFrequency` on the active turn-off V_DS. C comes from a new `cfg.circuit.Coss`, else #55 charge-based. This is cycle-free, because #55 LC never uses #47 ringing.
+- **#48 Q_oss.** The spec method is at the active turn-on, reusing the 5g diode-current core. **Proposed addition:** a recovery-free Q_oss(V_DC) at the active turn-off, ∫I_F from the gate instant until V_DS,N crosses 0. That would separate the minority-carrier Q_rr from the capacitive charge measured in 5g (design §17.4).
+- **#55.** LC: 1/((2πf_r)²L). Charge-based: Q_oss/ΔV. The model is stated in the tag.
+- **Open question:** should a method that returns "skipped" (e.g. no C available for ringing) also fall through to the next method, like the noise-limited fallback?
 
 The bus-voltage plan below is kept for reference.
 
