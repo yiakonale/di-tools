@@ -148,6 +148,12 @@ r = run(res, "Err", on2, "turnOn", with("Err", "vdc10"));
 check(r.status == "ok" && abs(r.value / integ(tr.t, pF, v10, t02) - 1) < 2e-3, ...
     sprintf('E_rr from V_F at 10 %% of V_DC = truth: %s', formatResult(r)));
 
+r = run(res, "Err", on2, "turnOn", with("Err", "trrEnd"));
+check(r.status == "ok" && abs(r.value / integ(tr.t, pF, t0, endIEC) - 1) < 1e-6 && contains(r.methodTag, "t_rr IEC 60747-2"), ...
+    sprintf('E_rr zero crossing to t_rr end (decision 2026-10-20) = truth: %s', formatResult(r)));
+r = run(res, "Err", on2, "turnOn");
+check(~any(r.flags == "methodFallback"), 'clean synthetic: IEC-2 E_rr resolves, no fallback');
+
 r = run(res, "didtRR", on2, "turnOn");
 ta_ = crossAfter(tr.t, tr.iF, 0.5 * interp1(tr.t, tr.iF, g10), "falling", g10, t0 + 1e-12);
 tb_ = crossAfter(tr.t, tr.iF, -0.5 * Irrm, "falling", t0, tp);
@@ -214,9 +220,22 @@ if isfolder(ex)
     check(okI, "example: I_rrm 20-50 A on pulses 2-9 (A:" + txt + ")");
     check(okJ, 'example: JEDEC t_rr 15-60 ns on pulses 2-9');
     check(okX, 'example: dI_D,over within 10 A of I_rrm (spec built-in check)');
+    r = run(rx, "trr", P.turnOnEdge(3), "turnOn", with("trr", "IEC2"));
+    check(r.status == "failed" && r.noiseLimited && contains(r.reason, "noise floor"), ...
+        sprintf('example: IEC-2 t_rr alone refused, noise-limited (%s)', r.reason));
     r = run(rx, "trr", P.turnOnEdge(3), "turnOn");
-    check(r.status == "failed" && contains(r.reason, "noise floor"), ...
-        sprintf('example: IEC-2 t_rr refused, 90 %% of I_rrm within the noise (%s)', r.reason));
+    rj = run(rx, "trr", P.turnOnEdge(3), "turnOn", with("trr", "JEDEC"));
+    check(r.status == "ok" && any(r.flags == "methodFallback") && r.provenance.fallbackFrom(1).method == "IEC2" && ...
+        contains(r.provenance.fallbackFrom(1).reason, "noise floor") && r.value == rj.value, ...
+        sprintf('example: preset t_rr falls back IEC-2 -> JEDEC, flagged: %s', formatResult(r)));
+    r = run(rx, "Err", P.turnOnEdge(3), "turnOn");
+    check(r.status == "ok" && any(r.flags == "methodFallback") && r.methodId == "trrEnd" && ...
+        numel(r.provenance.fallbackFrom) == 2, sprintf('example: E_rr falls back past both 2 %% windows: %s', formatResult(r)));
+    rx.cfg.switchingFrequency = 20e3;
+    r = run(rx, "Psw", [P.turnOffEdge(2), P.turnOnEdge(3)], "pair", with("Psw", "phaseLeg"));
+    check(r.status == "ok" && r.provenance.Err > 0, sprintf('example: phase-leg P_sw now resolves: %s', formatResult(r)));
+    r = run(rx, "Qrr", P.turnOnEdge(3), "turnOn", with("Qrr", "IEC2"));
+    check(r.status == "failed" && contains(r.reason, "2 %"), 'example: explicit IEC-2 Q_rr alone: no fallback, refused');
     r = run(rx, "Irrm", P.turnOnEdge(10), "turnOn");
     check(r.status == "failed" && contains(r.reason, "refused"), ...
         'example: pulse 10 derived current refused (I_D sensor drift, Q5)');

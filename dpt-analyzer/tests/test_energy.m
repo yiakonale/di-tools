@@ -145,6 +145,11 @@ r1 = run(resX, "Eon", P.turnOnEdge(1), "turnOn");
 r1g = run(resX, "Eon", P.turnOnEdge(1), "turnOn", S9);
 check(r1.status == "failed" && contains(r1.reason, "noise floor") && r1g.status == "ok", sprintf( ...
     'example zero-current pulse 1: IEC-8 E_on refused (current threshold), IEC-9 gives %s', formatResult(r1g)));
+% Noise-limited fallback (design 17.5) never moves to the other device's
+% standard: the refusal keeps the IEC-8 reason and lists the Conv methods.
+check(startsWith(r1.methodTag, "IEC 60747-8") && contains(r1.reason, "also tried") && ...
+    ~contains(r1.reason, "IEC9") && ~any(r1.flags == "methodDeviceMismatch"), ...
+    'example pulse 1: fallback skips IEC-9 on a MOSFET, keeps the IEC-8 refusal');
 
 fprintf('\n%d passed, %d failed\n', nPass, nFail);
 end

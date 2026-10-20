@@ -37,6 +37,9 @@ function th = transitionThreshold(pre, post, level, sigma, k)
 %     margin       min distance to pre/post divided by k*sigma (>= 1 is
 %                  resolvable; Inf when sigma = 0)
 %     resolvable   true if the rule holds
+%     noiseLimited true if the level lies inside the transition but too
+%                  close to a level for the noise (the only failure that a
+%                  cleaner signal or another method could avoid)
 %     reason       explanation when not resolvable, "" otherwise
 
 arguments
@@ -70,6 +73,7 @@ end
 
 inside = th.amplitude > 0 && th.fraction > 0 && th.fraction < 1;
 th.resolvable = inside && distance >= floorLevel;
+th.noiseLimited = inside && ~th.resolvable;
 
 if th.amplitude == 0
     th.reason = "the transition has zero amplitude";

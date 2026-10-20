@@ -35,11 +35,13 @@ end
 a = resolveThreshold(ctx, start, -Inf, S);
 if ~a.found
     r.reason = "start: " + a.reason;
+    r.noiseLimited = a.noiseLimited;
     return
 end
 b = resolveThreshold(ctx, stop, a.time, S);
 if ~b.found
     r.reason = "stop: " + b.reason;
+    r.noiseLimited = b.noiseLimited;
     return
 end
 

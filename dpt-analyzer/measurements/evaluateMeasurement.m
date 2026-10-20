@@ -18,6 +18,15 @@ function results = evaluateMeasurement(def, ctx, S)
 %        a bus-voltage model (col.busVoltage, busVoltageModel).
 %     4. If none is available, the result is "skipped" and the reason
 %        lists what each preferred method was missing.
+%     5. Noise-limited fallback (user decision 2026-10-20, design 17.5): a
+%        method that FAILS only because the noise-floor rule refused one of
+%        its levels (result.noiseLimited) is followed by the next available
+%        method in the preference order. A result reached this way is
+%        flagged "methodFallback"; provenance.fallbackFrom lists each method
+%        passed over and why. A fallback never moves to a method of the
+%        other device type's standard (IEC-9 on a MOSFET). If every method
+%        fails, the first failure is returned with the others' reasons
+%        appended.
 %
 %   Presets: a "preset" entry in the preference list is replaced by
 %   def.presets.(IEC8|IEC9) for S.measurements.preset ("auto" follows
@@ -59,13 +68,18 @@ end
 
 present = [ctx.col.channels.signal];
 why = strings(1, 0);
+passed = struct('method', {}, 'tag', {}, 'reason', {});
+first = [];
 for id = prefs
     m = def.methods(known == id);
+    mismatch = (m.standard == "IEC-8" && cfg.deviceType == "IGBT") || ...
+        (m.standard == "IEC-9" && cfg.deviceType == "MOSFET");
+    if ~isempty(first) && mismatch
+        continue        % a fallback never moves to the other device's standard
+    end
     [ok, sig, missing] = available(m, present, ctx.col, cfg, S);
     if ok
         results = def.fn(def, m, ctx, sig, S);
-        mismatch = (m.standard == "IEC-8" && cfg.deviceType == "IGBT") || ...
-            (m.standard == "IEC-9" && cfg.deviceType == "MOSFET");
         for k = 1:numel(results)
             results(k).provenance.signals = sig;
             results(k).provenance.preset = presetName(cfg, S);
@@ -73,9 +87,33 @@ for id = prefs
                 results(k).flags = unique([results(k).flags, "methodDeviceMismatch"], 'stable');
             end
         end
+        if all([results.status] == "failed") && (any([results.noiseLimited]) || ~isempty(first))
+            % Refused by the noise floor only (or a later link of such a
+            % fallback chain failed): try the next method.
+            if isempty(first)
+                first = results;
+            end
+            passed(end+1) = struct('method', m.id, 'tag', string(results(1).methodTag), ...
+                'reason', string(results(1).reason)); %#ok<AGROW>
+            continue
+        end
+        if ~isempty(passed) && any([results.status] == "ok")
+            for k = 1:numel(results)
+                results(k).flags = unique([results(k).flags, "methodFallback"], 'stable');
+                results(k).provenance.fallbackFrom = passed;
+            end
+        end
         return
     end
     why(end+1) = id + " needs " + missing; %#ok<AGROW>
+end
+if ~isempty(first)
+    results = first;
+    if numel(passed) > 1
+        more = arrayfun(@(p) p.method + ": " + p.reason, passed(2:end));
+        results(1).reason = results(1).reason + "; also tried " + strjoin(more, "; ");
+    end
+    return
 end
 results = skipped(def, ctx, "no method available in this collection: " + strjoin(why, "; "));
 

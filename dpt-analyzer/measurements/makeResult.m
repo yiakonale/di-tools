@@ -39,6 +39,7 @@ r.edgeIds = ctx.edgeIds;
 r.pulseIndex = ctx.pulseIndex;
 r.collection = ctx.collection;
 r.flags = strings(1, 0);
+r.noiseLimited = false;    % a failure caused only by the noise-floor rule (Q2)
 r.provenance = struct();
 
 end

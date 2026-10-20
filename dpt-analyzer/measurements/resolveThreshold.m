@@ -24,6 +24,7 @@ function th = resolveThreshold(ctx, spec, after, S)
 %   (transitionThreshold, k = noiseFloorMultiple).
 %
 %   Output struct: found, time [s, corrected], level, signal, reason,
+%   noiseLimited (true when the noise-floor rule refused the level),
 %   levels (eventLevels output, or [] for gate thresholds), margin.
 
 arguments
@@ -39,7 +40,7 @@ end
 e = ctx.edges(spec.edge);
 name = resolveRole(spec.signal, ctx.cfg, S);
 th = struct('found', false, 'time', NaN, 'level', NaN, 'signal', name, ...
-    'reason', "", 'levels', [], 'margin', NaN);
+    'reason', "", 'levels', [], 'margin', NaN, 'noiseLimited', false);
 
 %% Gate thresholds: timed like the gate edge itself
 if spec.basis == "gate"
@@ -90,6 +91,7 @@ chk = transitionThreshold(lv.pre, lv.post, level, lv.sigma, S.measurements.commo
 th.margin = chk.margin;
 if ~chk.resolvable
     th.reason = name + ": " + chk.reason;
+    th.noiseLimited = chk.noiseLimited;
     return
 end
 

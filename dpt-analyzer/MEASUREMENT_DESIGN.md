@@ -333,7 +333,7 @@ One row per (measurement, method, event, collection), with these fields:
 | Event | `eventKind`, `edgeId`, `pulseIndex` |
 | Source | `collection` |
 | Operating point | V_DC, I (copied from #1–4 so every row is self-describing) |
-| Outcome | `status`: `ok` \| `skipped` (unsupported: missing data, device type, disabled) \| `failed` (attempted: threshold never reached, check refused) |
+| Outcome | `status`: `ok` \| `skipped` (unsupported: missing data, device type, disabled) \| `failed` (attempted: threshold never reached, check refused); `noiseLimited` (a failure caused only by the noise-floor rule, §17.5) |
 | Explanation | `reason` |
 | Provenance | Threshold times and levels used, filter, signal sources |
 | Checks | `warnings` |
@@ -888,7 +888,7 @@ The diode is the non-active device's body or antiparallel diode (§2.2). Its for
 | #41 t_a / #42 t_b | t0 → tp; tp → the t_rr end of the method chosen for #40 (in the tag) |
 | #43 S | `ratio` t_b/t_a; `IEC2` S_rr **skipped** as deferred (spec) |
 | #44 Q_rr | `IEC2` ∫−I_F from t0 to 2 % of I_rrm; `trrEnd` (to the #40 end); `triangle` t_rr·I_rrm/2; `custom` (`custom.recoveryEnd` fraction, or `custom.recoveryDuration`) |
-| #45 E_rr | ∫v_F·i_F with v_F = −V_DS,N (positive while it recovers): `IEC2` t0 → 2 % I_rrm; `vdc10` V_DS,N at 10 % of V_DC → 2 % I_rrm; `custom` |
+| #45 E_rr | ∫v_F·i_F with v_F = −V_DS,N (positive while it recovers): `IEC2` t0 → 2 % I_rrm; `vdc10` V_DS,N at 10 % of V_DC → 2 % I_rrm; `trrEnd` t0 → the #40 end (added 2026-10-20, §17.5); `custom` |
 | #46 di_F/dt | `zeroCrossing`: slope of a line fit through I_F between +`didtLevels(1)`·I_F0 and −`didtLevels(2)`·I_rrm (0.5 / 0.5). `peakTb`: max \|di/dt\| over t_b (Savitzky-Golay, `recovery.derivativeFraction`·t_b). `custom` (`custom.didtRR` [A]). |
 | #12 P_sw | new method `phaseLeg`: f_s·(E_sw + E_rr), with E_rr at the pair's turn-on (same operating point) |
 
@@ -920,3 +920,22 @@ I_rrm, Q_rr, E_rr and di_F/dt are magnitudes. The tag states the diode-current s
 - **Q_rr ≈ 640 nC, independent of current** (pulses 2–8). The charge is capacitive: for this SiC MOSFET, "Q_rr" is mostly the non-active device's Q_oss, not minority-carrier charge. Separating the two needs Q_oss (#48, 5h).
 - **Pulses 9–10.** I_rrm and Q_rr drop at pulse 9, and at pulse 10 dI_D,over collapses to 4.6 A and the derived current is refused. The I_D sensor stops following the turn-on transient at the highest currents (§16.4), so the pulse 9–10 stress and recovery values on I_D are not reliable.
 - **Not resolvable here:** IEC-2 t_rr (the 0.9 I_rrm point is about 2.7 A from the peak, against a 3.1–4 A floor) and every 2 % end point (about 0.6 A). So Q_rr IEC-2, E_rr (both spec windows) and the phase-leg P_sw fail with that reason. With a probe on the non-active device the floor would be that probe's noise alone.
+
+### 17.5 User decisions on 5g (2026-10-20)
+
+1. **E_rr window to the t_rr end (agreed).** New `[Conv]` method `trrEnd`: integral of v_F·i_F from the zero crossing to the t_rr end point of #40, mirroring the Q_rr option. The tag names the t_rr method, and it inherits that result's flags.
+2. **Noise-limited fallback (agreed), in `evaluateMeasurement` for every measurement.**
+   - A method that fails *only* because the noise-floor rule refused one of its levels is followed by the next available method in the preference order.
+   - **Marking.** Results carry the new field `noiseLimited`. `transitionThreshold`/`resolveThreshold` report it, and `measureInterval`, `measureEnergy`, `measureSlew`, `measureStress` and `measureRecovery` propagate it. Composites pass their inner result's value on.
+   - **Success.** A result reached this way is flagged `methodFallback`, and `provenance.fallbackFrom` lists each method passed over with its reason.
+   - **No device crossing.** A fallback never moves to a method of the other device type's standard. On the example, the zero-current pulse-1 E_on would otherwise have fallen from IEC-8 to IEC-9 and reported 220 µJ.
+   - **All fail.** The preferred method's failure is returned, with every other attempt appended ("also tried …").
+   - **Explicit choice.** A single explicitly chosen method has no fallback, so `trr = "IEC2"` still fails honestly.
+3. **#46 levels (agreed):** the zero-crossing slope is fitted between +50 % of I_F and −50 % of I_rrm.
+
+**[data] Effect on the example** (presets, derived diode current):
+- t_rr falls back from IEC-2 to JEDEC (flagged), and t_b, S, Q_rr and di/dt (t_b) follow it.
+- E_rr falls back past both 2 % windows to `trrEnd`.
+- The phase-leg P_sw now resolves: 134.5 W at pair 2–3 and 578 W at pair 8–9, at f_s = 20 kHz.
+- No other suite changed, except the pulse-1 E_on refusal, which now lists its attempts.
+

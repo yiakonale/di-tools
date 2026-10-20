@@ -11,13 +11,13 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | 5a–5g done (5g awaiting review); V_DS probe calibration added; **5h next** |
+| 5 | Measurement specification & registry | 5a–5g done (5g confirmed 2026-10-20); V_DS probe calibration added; **5h next** |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
 ## Resume here
 
-_Last session ended 2026-10-19 after 5g. Every step is committed locally; the user pushes. To resume, ask Claude to "resume the DPT analyzer from the log", then answer the three 5g decisions below._
+_Last updated 2026-10-20. Every step is committed locally; the user pushes._
 
 **State:**
 - Batches 1–4 are done.
@@ -29,21 +29,16 @@ _Last session ended 2026-10-19 after 5g. Every step is committed locally; the us
   - 5e: switching energy and power #5–12 (confirmed by the user 2026-10-19).
   - V_DS probe calibration (`normalizeVoltageSensors`), opt-in, 2026-10-19.
   - 5f: voltage, current and gate stress #29–38 (`measureStress`, design §16), confirmed 2026-10-19; one shared settling test `settledAfter` (§16.4).
-  - 5g: reverse recovery #39–46 and the phase-leg P_sw (`measureRecovery`, design §17), 2026-10-19, **awaiting the user's review**.
+  - 5g: reverse recovery #39–46 and the phase-leg P_sw (`measureRecovery`, design §17), confirmed 2026-10-20 with a noise-limited method fallback (§17.5).
 - Remaining in Batch 5: 5h parasitics (#47, #48 optional Q_oss, #55).
 - `dpt_analyzer.m` only configures and calls `runPipeline(cfg, S)`, which runs workflow steps 3–6c: import → detection → alignment → timeline → zero-offset correction (opt-in, **on** in the example) → current normalization (opt-in) → bus-voltage model, using C measured in the bucket where possible. The summary states the offsets removed and the V_DC source per collection.
 - Measurements are implemented and tested but **not yet run by the entry script**; that is Batch 6 (`runMeasurements`).
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy; test_stress; test_recovery` (38 + 31 + 33 + 40 + 25 + 27 + 34 + 21 + 38 + 36 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy; test_stress; test_recovery` (38 + 31 + 33 + 40 + 25 + 27 + 34 + 22 + 38 + 42 cases, plus the settings checks).
 
-**Next step (pick up here):** the user's review of 5g (design §17), with these open decisions:
-1. **E_rr window.** Both spec windows end at 2 % of I_rrm, which is not resolvable with the example's derived current, so E_rr and the phase-leg P_sw always fail there. Proposal: add a `[Conv]` window "zero crossing → t_rr end", mirroring the Q_rr option.
-2. **No fallback after a failed preset method.** The IEC-2 t_rr fails on the example (0.9 I_rrm is within the noise), and t_b, S, Q_rr and di/dt (t_b) fail with it. Options: keep it strict (the user picks JEDEC), or fall back to the next method when the failure is "within the noise floor", with a flag.
-3. **#46 "through the zero crossing"** is defined as a line fit between +50 % I_F and −50 % I_rrm. Confirm, or give the standard's levels.
-
-Then **Batch 5h**, parasitics (#47 L_loop, #48 optional Q_oss, #55 C_par). #48 would also separate Q_oss from the capacitive "Q_rr" (design §17.4).
+**Next step (pick up here): Batch 5h**, parasitics (#47 L_loop, #48 optional Q_oss, #55 C_par). #48 would also separate Q_oss from the capacitive "Q_rr" (design §17.4). 5g was confirmed with the three decisions of design §17.5.
 
 The bus-voltage plan below is kept for reference.
 
@@ -115,6 +110,17 @@ _Done 2026-10-15:_
 | `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`, `test_energy`, `test_stress`, `test_recovery`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-20 — 5g confirmed: E_rr to the t_rr end, noise-limited fallback, #46 levels
+
+- **E_rr:** new `[Conv]` method `trrEnd` (zero crossing → the #40 end).
+- **Fallback** (`evaluateMeasurement`, design §17.5):
+  - A method refused only by the noise-floor rule (new result field `noiseLimited`) gives way to the next method, and the result is flagged `methodFallback`.
+  - It never moves to the other device's standard: a found case was the zero-current E_on falling to IEC-9.
+  - When all methods fail, the preferred method's reason is kept and the other attempts are listed.
+- **#46:** the zero-crossing slope between +50 % I_F and −50 % I_rrm is confirmed.
+- **[data] Example:** t_rr IEC-2 → JEDEC and E_rr → `trrEnd`, so the phase-leg P_sw resolves (134.5 W / 578 W at 20 kHz).
+- **Tests:** `test_recovery` 42 and `test_energy` 22 cases; all suites pass.
 
 ### 2026-10-19 — Batch 5g: reverse recovery and the phase-leg P_sw
 

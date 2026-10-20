@@ -67,6 +67,7 @@ switch method.id
         c90 = resolveThreshold(ctx, spec, g, S);
         if ~c90.found
             r.reason = "V_DS 90 %: " + c90.reason;
+            r.noiseLimited = c90.noiseLimited;
             return
         end
         range = [c90.time, min(c90.time + S.measurements.params.stress.after90Window * e.D, ...
@@ -140,6 +141,7 @@ elseif ~isCurrent                      % turn-on dip: current-rise phase
     b = resolveThreshold(ctx, struct('signal', "drainCurrent@active", 'level', 0.9, 'basis', "transition", 'edge', 1), a.time, S);
     if ~(a.found && b.found)
         r.reason = "current-rise phase: " + strjoin([a.reason, b.reason], "; ");
+        r.noiseLimited = a.noiseLimited || b.noiseLimited;
         return
     end
     s = getSignal(ctx.col, name, [a.time, b.time], S);
@@ -151,6 +153,7 @@ else                                   % current undershoot after a turn-off
     a = resolveThreshold(ctx, struct('signal', "drainCurrent@active", 'level', 0.1, 'basis', "transition", 'edge', 1), g, S);
     if ~a.found
         r.reason = "I_D 10 %: " + a.reason;
+        r.noiseLimited = a.noiseLimited;
         return
     end
     [ts, settled] = settledEnd(ctx, e, name, true, S);

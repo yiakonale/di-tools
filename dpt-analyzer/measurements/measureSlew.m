@@ -75,6 +75,7 @@ else
         lv.sigma, S.measurements.common.noiseFloorMultiple);
     if ~chk.resolvable
         r.reason = name + ": " + chk.reason;
+        r.noiseLimited = chk.noiseLimited;
         return
     end
     pre = lv.pre; post = lv.post;

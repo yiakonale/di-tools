@@ -28,7 +28,9 @@ function r = measureRecovery(def, method, ctx, sig, S)
 %            +noiseFloorMultiple*sigma (or ts if it does not)
 %     I_rrm  -min(I_F) over the lobe, raw samples, with its time tp
 %   A level p*I_rrm on the recovering slope is used only if
-%   min(p, 1 - p) * I_rrm is at least noiseFloorMultiple * sigma (Q2).
+%   min(p, 1 - p) * I_rrm is at least noiseFloorMultiple * sigma (Q2);
+%   a refusal sets r.noiseLimited, so evaluateMeasurement falls back to
+%   the next method (design 17.5).
 %
 %   Rows
 %     Irrm (#39)   raw or smoothed (Savitzky-Golay) peak, positive
@@ -40,7 +42,8 @@ function r = measureRecovery(def, method, ctx, sig, S)
 %                  a custom end; or the triangle t_rr * I_rrm / 2
 %     Err (#45)    integral of v_F * i_F (v_F = -V_DS of the non-active
 %                  device), from t0 or from V_DS,N at 10 % of V_DC, to 2 %
-%                  of I_rrm or a custom end; positive
+%                  of I_rrm, to the t_rr end (#40), or a custom end;
+%                  positive
 %     didtRR (#46) |di_F/dt|: line fit through the zero crossing, peak
 %                  |di/dt| during t_b, or between custom levels
 
@@ -260,12 +263,14 @@ end
 function r = recoveryTime(r, method, rc, S)
 if ~rc.resolvable
     r.reason = noRecovery(rc);
+    r.noiseLimited = true;
     return
 end
-[tEnd, info, why, status] = trrEnd(method.id, rc, S);
+[tEnd, info, why, status, noisy] = trrEnd(method.id, rc, S);
 if why ~= ""
     r.status = status;
     r.reason = why;
+    r.noiseLimited = noisy;
     return
 end
 r.value = tEnd - rc.t0;
@@ -274,24 +279,26 @@ r.provenance.endPoints = info;
 r = done(r, rc);
 end
 
-function [tEnd, info, why, status] = trrEnd(id, rc, S)
+function [tEnd, info, why, status, noisy] = trrEnd(id, rc, S)
 % End point of t_rr by method; info holds the construction points
-% (times relative to the edge, levels in A).
+% (times relative to the edge, levels in A). noisy: refused only by the
+% noise-floor rule.
 tEnd = NaN;
 info = struct();
 why = "";
 status = "failed";
+noisy = false;
 switch id
     case "IEC2"
-        [tEnd, info, why] = lineToZero(rc, [0.9, 0.25], S);
+        [tEnd, info, why, noisy] = lineToZero(rc, [0.9, 0.25], S);
     case "JEDEC"
-        [t25, why] = recovering(rc, 0.25, S);
+        [t25, why, noisy] = recovering(rc, 0.25, S);
         if why == ""
             tEnd = t25 + (t25 - rc.tp) * 0.25 / 0.75;
             info = struct('times', [rc.tp, t25] - rc.e.time, 'levels', -[1, 0.25] * rc.Irrm);
         end
     case "conv25"
-        [tEnd, why] = recovering(rc, 0.25, S);
+        [tEnd, why, noisy] = recovering(rc, 0.25, S);
         info = struct('times', tEnd - rc.e.time, 'levels', -0.25 * rc.Irrm);
     case "zero2"
         c = findCrossing(rc.t, rc.x, 0, "rising", [rc.tp, rc.e.territory(2)], "first");
@@ -307,20 +314,20 @@ switch id
             why = "no custom levels set (S.measurements.params.custom.trrLevels)";
             return
         end
-        [tEnd, info, why] = lineToZero(rc, L, S);
+        [tEnd, info, why, noisy] = lineToZero(rc, L, S);
 end
 end
 
-function [tEnd, info, why] = lineToZero(rc, L, S)
+function [tEnd, info, why, noisy] = lineToZero(rc, L, S)
 % Zero crossing of the line through the recovering current at -L(1) and
 % -L(2) of I_rrm.
 tEnd = NaN;
 info = struct();
-[t1, why] = recovering(rc, L(1), S);
+[t1, why, noisy] = recovering(rc, L(1), S);
 if why ~= ""
     return
 end
-[t2, why] = recovering(rc, L(2), S);
+[t2, why, noisy] = recovering(rc, L(2), S);
 if why ~= ""
     return
 end
@@ -328,13 +335,15 @@ tEnd = t2 + (t2 - t1) * L(2) / (L(1) - L(2));
 info = struct('times', [t1, t2] - rc.e.time, 'levels', -L * rc.Irrm);
 end
 
-function [t, why] = recovering(rc, p, S) %#ok<INUSD>
+function [t, why, noisy] = recovering(rc, p, S) %#ok<INUSD>
 % Time the recovering current rises through -p * I_rrm after the peak,
 % searched to the territory end (design 12.7): a low level such as 2 % of
 % I_rrm can lie inside the settling band.
 t = NaN;
 why = "";
+noisy = false;
 if min(p, 1 - p) * rc.Irrm < rc.k * rc.sigma
+    noisy = true;
     why = sprintf(['%g %% of I_rrm is within the noise floor (%.3g A from the peak or zero, ' ...
         'noise floor %.3g A)'], 100 * p, min(p, 1 - p) * rc.Irrm, rc.k * rc.sigma);
     return
@@ -353,6 +362,7 @@ tr = evaluateMeasurement(registryEntry("trr"), ctx, S);
 if tr.status ~= "ok"
     r.status = tr.status;
     r.reason = "t_rr: " + tr.reason;
+    r.noiseLimited = tr.noiseLimited;
     return
 end
 r.value = tr.provenance.endTime + rc.e.time - rc.tp;
@@ -373,6 +383,7 @@ if ta.status ~= "ok" || tb.status ~= "ok"
     r.status = "failed";
     if ta.status == "skipped" && tb.status == "skipped", r.status = "skipped"; end
     r.reason = "t_a: " + statusText(ta) + "; t_b: " + statusText(tb);
+    r.noiseLimited = ta.noiseLimited || tb.noiseLimited;
     return
 end
 r.value = tb.value / ta.value;
@@ -387,6 +398,7 @@ end
 function r = charge(r, method, rc, ctx, S)
 if ~rc.resolvable
     r.reason = noRecovery(rc);
+    r.noiseLimited = true;
     return
 end
 if method.id == "triangle"
@@ -395,6 +407,7 @@ if method.id == "triangle"
     if tr.status ~= "ok" || ir.status ~= "ok"
         r.status = "failed";
         r.reason = "t_rr: " + statusText(tr) + "; I_rrm: " + statusText(ir);
+        r.noiseLimited = tr.noiseLimited || ir.noiseLimited;
         return
     end
     r.value = tr.value * ir.value / 2;
@@ -403,10 +416,11 @@ if method.id == "triangle"
     r.status = "ok";
     return
 end
-[t1, why, status, extra] = recoveryEnd(method.id, rc, ctx, S);
+[t1, why, status, extra, noisy, inner] = recoveryEnd(method.id, rc, ctx, S);
 if why ~= ""
     r.status = status;
     r.reason = why;
+    r.noiseLimited = noisy;
     return
 end
 s = getSignal(rc.ctxV.col, "diodeCurrent", [rc.t0, t1] + [-rc.dt, rc.dt], S);
@@ -420,31 +434,37 @@ r.provenance.window = [rc.t0, t1] - rc.e.time;
 if extra ~= ""
     r.methodTag = sprintf('%s (%s)', r.methodTag, extra);
 end
+r.flags = unique([r.flags, inner], 'stable');
 r = done(r, rc);
 end
 
-function [t1, why, status, extra] = recoveryEnd(id, rc, ctx, S)
-% End of the Q_rr / E_rr integral by method.
+function [t1, why, status, extra, noisy, flags] = recoveryEnd(id, rc, ctx, S)
+% End of the Q_rr / E_rr integral by method; flags are those of an inner
+% result used for the end (e.g. methodFallback of #40).
 t1 = NaN;
 why = "";
 status = "failed";
 extra = "";
+noisy = false;
+flags = strings(1, 0);
 switch id
     case {"IEC2", "vdc10"}
-        [t1, why] = recovering(rc, 0.02, S);
+        [t1, why, noisy] = recovering(rc, 0.02, S);
     case "trrEnd"
         tr = evaluateMeasurement(registryEntry("trr"), ctx, S);
         if tr.status ~= "ok"
             status = tr.status;
             why = "t_rr: " + tr.reason;
+            noisy = tr.noiseLimited;
             return
         end
         t1 = tr.provenance.endTime + rc.e.time;
         extra = "t_rr " + tr.methodTag;
+        flags = tr.flags;
     case "custom"
         P = S.measurements.params.custom;
         if ~isempty(P.recoveryEnd)
-            [t1, why] = recovering(rc, P.recoveryEnd, S);
+            [t1, why, noisy] = recovering(rc, P.recoveryEnd, S);
         elseif ~isempty(P.recoveryDuration)
             t1 = rc.t0 + P.recoveryDuration;
             if t1 > rc.e.territory(2)
@@ -461,12 +481,14 @@ end
 function r = recoveryEnergy(r, method, rc, sig, ctx, S)
 if ~rc.resolvable
     r.reason = noRecovery(rc);
+    r.noiseLimited = true;
     return
 end
-[t1, why, status] = recoveryEnd(method.id, rc, ctx, S);
+[t1, why, status, extra, noisy, inner] = recoveryEnd(method.id, rc, ctx, S);
 if why ~= ""
     r.status = status;
     r.reason = why;
+    r.noiseLimited = noisy;
     return
 end
 t0 = rc.t0;
@@ -507,6 +529,10 @@ if ~info.complete || isnan(E)
 end
 r.value = E;
 r.provenance.window = [t0, t1] - rc.e.time;
+if extra ~= ""
+    r.methodTag = sprintf('%s (%s)', r.methodTag, extra);
+end
+r.flags = unique([r.flags, inner], 'stable');
 r = done(r, rc);
 end
 
@@ -525,6 +551,7 @@ switch method.id
         end
         if ~rc.resolvable || L(2) * rc.Irrm < rc.k * rc.sigma
             r.reason = noRecovery(rc);
+            r.noiseLimited = true;
             return
         end
         m = rc.t >= a.time & rc.t <= b.time;
@@ -540,9 +567,11 @@ switch method.id
         if tr.status ~= "ok"
             r.status = tr.status;
             r.reason = "t_rr: " + tr.reason;
+            r.noiseLimited = tr.noiseLimited;
             return
         end
         tEnd = tr.provenance.endTime + rc.e.time;
+        r.flags = unique([r.flags, tr.flags], 'stable');
         n = max(P.derivative.minSamples, round(P.recovery.derivativeFraction * (tEnd - rc.tp) / rc.dt));
         n = n + (mod(n, 2) == 0);
         pad = ((n - 1) / 2 + 1) * rc.dt;

@@ -67,6 +67,7 @@ end
 a = resolveThreshold(ctx, start, -Inf, S);
 if ~a.found
     r.reason = "start: " + a.reason;
+    r.noiseLimited = a.noiseLimited;
     return
 end
 if isempty(stop)                                    % fixed duration
@@ -82,6 +83,7 @@ else
     b = resolveThreshold(ctx, stop, a.time, S);
     if ~b.found
         r.reason = "stop: " + b.reason;
+        r.noiseLimited = b.noiseLimited;
         return
     end
 end
@@ -257,6 +259,7 @@ if method.id == "phaseLeg"
     if er.status ~= "ok"
         r.status = er.status;
         r.reason = "E_rr: " + er.reason;
+        r.noiseLimited = er.noiseLimited;
         return
     end
     E = E + er.value;
