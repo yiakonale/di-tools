@@ -11,7 +11,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | 5a–5g done (5g confirmed 2026-10-20); V_DS probe calibration added; **5h next** |
+| 5 | Measurement specification & registry | 5a–5h done (5h awaiting review); V_DS probe calibration added |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -30,25 +30,22 @@ _Last updated 2026-10-20. Every step is committed locally; the user pushes._
   - V_DS probe calibration (`normalizeVoltageSensors`), opt-in, 2026-10-19.
   - 5f: voltage, current and gate stress #29–38 (`measureStress`, design §16), confirmed 2026-10-19; one shared settling test `settledAfter` (§16.4).
   - 5g: reverse recovery #39–46 and the phase-leg P_sw (`measureRecovery`, design §17), confirmed 2026-10-20 with a noise-limited method fallback (§17.5).
-- Remaining in Batch 5: 5h parasitics (#47, #48 optional Q_oss, #55).
+  - 5h: parasitics #47 L_loop, #48 Q_oss (optional), #55 C_par (`measureParasitics`, design §18), 2026-10-20, **awaiting the user's review**.
+- Batch 5 is complete once 5h is reviewed.
 - `dpt_analyzer.m` only configures and calls `runPipeline(cfg, S)`, which runs workflow steps 3–6c: import → detection → alignment → timeline → zero-offset correction (opt-in, **on** in the example) → current normalization (opt-in) → bus-voltage model, using C measured in the bucket where possible. The summary states the offsets removed and the V_DC source per collection.
 - Measurements are implemented and tested but **not yet run by the entry script**; that is Batch 6 (`runMeasurements`).
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy; test_stress; test_recovery` (38 + 31 + 33 + 40 + 25 + 27 + 34 + 22 + 38 + 42 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy; test_stress; test_recovery; test_parasitics` (38 + 31 + 33 + 40 + 25 + 27 + 34 + 22 + 38 + 42 + 20 cases, plus the settings checks).
 
-**State: paused after 5g at the user's request (2026-10-20).** 5g was confirmed with the three decisions of design §17.5. **5h** (parasitics: #47 L_loop, #48 optional Q_oss, #55 C_par) is **on hold** until the user says to resume; no 5h code exists yet.
+**Next step (pick up here):** the user's review of 5h (design §18). That completes Batch 5. Decisions taken in 5h on recommendation, to confirm:
+1. **#47 dip reference.** The default is V_DS's own pre-level (V_DC + V_F). The spec's literal V_DC form is kept as `dipVdc`.
+2. **Added #48 method `turnOffDischarge`.** It gives a recovery-free Q_oss(V_DC) and on the example splits the 5g Q_rr into about half Q_oss and half real recovery charge.
+3. **Self-skipping methods fall through** to the next method, like unavailable ones.
+4. **#47 ringing takes C only from `cfg.circuit.Coss`** (not from #55 charge-based). The data showed that #55's C belongs to a different device and is a different kind of C.
 
-_5h design notes (not started, to be reviewed with the user before coding):_
-- **Event-specific methods.** A new method field `events` checked in `available()`. #47's dip applies at turn-on; overshoot and ringing apply at turn-off.
-- **Cross-event context.** `ctx` would also carry `al`/`tl`, so #55 LC at a turn-off can take L from the dip at the same pulse's turn-on.
-- **#47 dip.** L = ∫(V_DS,pre − V_DS)dt / ΔI_D over I_D 10–90 %. The reference is V_DS's own pre-level (V_DC + V_F) rather than the spec's V_DC; that choice is for the user. The integral form avoids differentiating noise.
-- **#47 overshoot.** dV_DS,over (#30) / the turn-off di/dt (#25), flagged as including capacitive charging.
-- **#47 ringing.** Uses `ringingFrequency` on the active turn-off V_DS. C comes from a new `cfg.circuit.Coss`, else #55 charge-based. This is cycle-free, because #55 LC never uses #47 ringing.
-- **#48 Q_oss.** The spec method is at the active turn-on, reusing the 5g diode-current core. **Proposed addition:** a recovery-free Q_oss(V_DC) at the active turn-off, ∫I_F from the gate instant until V_DS,N crosses 0. That would separate the minority-carrier Q_rr from the capacitive charge measured in 5g (design §17.4).
-- **#55.** LC: 1/((2πf_r)²L). Charge-based: Q_oss/ΔV. The model is stated in the tag.
-- **Open question:** should a method that returns "skipped" (e.g. no C available for ringing) also fall through to the next method, like the noise-limited fallback?
+Then **Batch 6**, `runMeasurements`: eligibility, dependency order, built-in checks (including dI_D,over ≈ I_rrm), results and report.
 
 The bus-voltage plan below is kept for reference.
 
@@ -72,7 +69,7 @@ _Done 2026-10-15:_
 **Open points:**
 - **`S.alignment.maxResidual` is unset.** Only one bucket, with one collection, exists so far. Calibrate it once a real multi-collection bucket exists: its residuals will show the real shot-to-shot gate jitter.
 - **Example normalization offset:** b = +0.75 A remains after zero correction. It is below a fifth of one Iout ADC step and so unresolvable; noted only.
-- **I_D sensor at the highest currents (pulses 9–10):** dI_D,over collapses from 35 A to 4.6 A at pulse 10, and the derived diode current is refused there (design §17.4). Results that rely on I_D during that turn-on are unreliable, including E_io, stress and recovery. Check the probe's rating and bandwidth at 600 A.
+- **I_D sensor at the highest currents (pulses 8–10; 5h shows it from pulse 8 in the turn-off transient):** dI_D,over collapses from 35 A to 4.6 A at pulse 10, and the derived diode current is refused there (design §17.4). Results that rely on I_D during that turn-on are unreliable, including E_io, stress and recovery. Check the probe's rating and bandwidth at 600 A.
 - **E_io at the pulse-10 turn-on** remains below its trend. New evidence (design §16.4): the I_D sensor recovers slowly after that highest-current turn-on, with Id-LS / Iout rising from 0.92 to 0.96 over the on-time against a flat 0.93–0.94 before. That points to the sensor rather than the analysis; check the probe's rating and its low-frequency response. With the V_DS calibration, the pair ratio E_io / E_sw is 1.052 against 1.12–1.17 elsewhere (1.009 without the calibration), so the probe mismatch explains part of it but not all. Worth a look at that waveform.
 
 **Working agreements:**
@@ -104,7 +101,7 @@ _Done 2026-10-15:_
 | `bucketCapacitance.m` | Combines the DC-link capacitance measured in the bucket's direct-source collections, for use in its other collections. |
 | `normalizeVoltageSensors.m` | Opt-in relative V_DS probe-gain calibration from the KVL jump across turn-offs; also reports the DC-link + busbar resistance (step 6b′). |
 | `normalizeCurrentSensors.m` | Opt-in I_D / I_L sensor calibration on the on-state segments (pipeline step 6b). |
-| `measurements/measurementRegistry.m` | Measurement and method definitions (slots, tags, implementations). Currently #1–46 and #49–54. |
+| `measurements/measurementRegistry.m` | Measurement and method definitions (slots, tags, event-specific methods, implementations). All rows #1–55. |
 | `measurements/evaluateMeasurement.m` | Optional/device gating, method selection by preference and available signals, skip reasons. |
 | `measurements/eventContext.m`, `gateInstant.m`, `windowStats.m`, `resolveRole.m`, `makeResult.m`, `valueFlags.m`, `formatResult.m` | Framework helpers: event times in corrected time, V_GS p % instants, window statistics, role to signal, result skeleton, quality flags, tagged one-line output. |
 | `measurements/measureBusVoltage.m`, `measureSwitchingCurrent.m`, `measureConduction.m` | Implementations of #1–2, #3–4 and #49–54. |
@@ -112,14 +109,40 @@ _Done 2026-10-15:_
 | `measurements/measureInterval.m`, `measureSlew.m`, `measureDeadTime.m` | Timing #13–22, slew rates #24–28, dead time #23. |
 | `measurements/measureEnergy.m` | Switching energy and power #5–12 (windows, method sets, E_io, composites). |
 | `measurements/settledAfter.m` | The one settling test ("ringing has decayed"): band above the noise envelope, ringing-safe noise estimate, local trend for ramps (design §16.3–16.4). |
+| `measurements/measureParasitics.m` | Loop inductance #47 (turn-on dip, ringing with cfg C_oss, overshoot) and parasitic capacitance #55 (LC, charge-based). |
+| `measurements/relatedContext.m` | Event context of another event in the same collection (e.g. the same pulse's turn-on). |
 | `measurements/measureRecovery.m` | Reverse recovery #39–46: diode current as a virtual channel (measured −I_D,N, or opt-in derived trend(I_L) − I_D with the Q5 check), I_rrm, t_rr (IEC-2/JEDEC/25 %/second zero), t_a, t_b, S, Q_rr, E_rr, di_F/dt. |
 | `measurements/measureStress.m` | Voltage, current and gate stress #29–38: peak windows until the ringing decays, over/undershoot references, ratings, cross-talk. |
 | `tests/makeSyntheticDPT.m` | Synthetic phase-leg generator with known truth, for measurement tests (optional V_DS/I_D ringing and gate bumps). |
 | `measurements/primitives/` | Pure numeric building blocks with explicit arguments (no settings): `findCrossing`, `transitionThreshold`, `integrateBetween`, `noiseLevel`, `settlingTime`, `filterSignal`, `differentiateSignal`, `savgolKernel`, `ringingFrequency`, `slopeBandMax`, `localTrend`. |
 | `data/example/collection_A/` | Tek MSO58B example record and its `channelMap.m`. |
-| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`, `test_energy`, `test_stress`, `test_recovery`); formalized in Batch 7. |
+| `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`, `test_energy`, `test_stress`, `test_recovery`, `test_parasitics`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-20 — Batch 5h: parasitics #47, #48, #55
+
+- **Implemented** (design §18):
+  - #47: dip / dipVdc at turn-on; ringing (cfg C_oss) and overshoot at turn-off.
+  - #48 (optional): the spec's turn-on method, plus the added recovery-free turn-off discharge.
+  - #55: LC (L from the same pulse's turn-on dip) and charge-based.
+- **Framework:**
+  - Event-specific methods (`method.events`).
+  - Self-skipping methods fall through.
+  - `ctx.al`/`ctx.tl` and `relatedContext`.
+  - New `cfg.circuit.Coss`; settings 0.15.0.
+- **Generator:** `vShift`, `Lloop` and `CossHS` options (off by default; every earlier suite is unchanged).
+- **Bugs found while testing:**
+  - The ringing fit now starts at the first crossing after the peak (f_r was 4 % high).
+  - Undetectable ringing is noise-limited and falls back.
+  - The turn-off Q_oss window starts at the V_DS,N fall, not the gate instant (an offset was integrating over the 270 ns delay).
+  - #47 ringing no longer takes C from #55, because that C belongs to the other device.
+- **[data] Example:**
+  - L_loop ≈ 7 nH, dip and overshoot agreeing within 10 %.
+  - Turn-off Q_oss ≈ 300–375 nC, so about half of the 5g Q_rr is recovery charge.
+  - C_LC ≈ 1.5–2.2 nF (two paralleled LS devices).
+  - The I_D sensor fails the fast transient from pulse 8.
+- **Verified:** `tests/test_parasitics.m` passes 20 cases. All 12 suites pass, as does `dpt_analyzer.m`.
 
 ### 2026-10-20 — 5g confirmed: E_rr to the t_rr end, noise-limited fallback, #46 levels
 

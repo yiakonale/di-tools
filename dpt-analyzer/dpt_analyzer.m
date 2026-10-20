@@ -79,6 +79,10 @@ cfg.diodeCurrent.allowDerived = false;
 % The summary states which one was used for each collection.
 cfg.circuit.Cdc          = [];      % [F] DC-link capacitance, e.g. 680e-6; [] = unknown
 cfg.circuit.CdcTolerance = 0.20;    % [-] tolerance of Cdc (DC-link capacitors: typ. 20 %)
+% Optional: the active device's C_oss at the test voltage (datasheet), for
+% the loop inductance from the turn-off ringing (#47). Without it, the
+% ringing method uses the measured charge-based C (#55, needs #48).
+cfg.circuit.Coss         = [];      % [F], e.g. 250e-12; [] = unknown
 
 %% Settings overrides (optional) ---------------------------------------
 % Example: settingsOverrides.report.verbosity = "verbose";

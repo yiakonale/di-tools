@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.14.0";
+S.schemaVersion = "0.15.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -468,6 +468,14 @@ S.measurements.methods.Srr           = "preset";
 S.measurements.methods.Qrr           = "preset";
 S.measurements.methods.Err           = "preset";
 S.measurements.methods.didtRR        = "preset";
+% Parasitics (#47, #48, #55): "preset" (each row's first [Conv] method
+% that applies to the event), or explicit ids. #47 "dip" / "dipVdc" apply
+% at turn-on, "ringing" / "overshoot" at turn-off. #48 (optional) "zeroTo90"
+% at turn-on, "turnOffDischarge" at turn-off. #55 "LC" at turn-off,
+% "charge" at both.
+S.measurements.methods.Lloop         = "preset";
+S.measurements.methods.Qoss          = "preset";
+S.measurements.methods.Cpar          = "preset";
 
 % Method parameters.
 % onStateWindow "delayToEnd": delay after V_DS reaches 10 % at turn-on
@@ -570,6 +578,11 @@ S.measurements.params.custom.trrLevels        = [];
 S.measurements.params.custom.recoveryEnd      = [];
 S.measurements.params.custom.recoveryDuration = [];
 S.measurements.params.custom.didtRR           = [];
+
+% Q_oss (#48) custom end: V_DS of the non-active device reaching QossEnd
+% (fraction) of its peak ("peak") or of V_DC ("Vdc").
+S.measurements.params.custom.QossEnd   = [];
+S.measurements.params.custom.QossBasis = "peak";
 
 %% Reporting ----------------------------------------------------------
 % Warnings are always collected in the results. This controls whether
@@ -821,6 +834,11 @@ if ~isempty(L) && ~(isnumeric(L) && isscalar(L) && L > 0 && L < 1)
     fail('measurements.params.custom.recoveryEnd', 'must be [] or a fraction in (0, 1).');
 end
 mustBeEmptyOrPositiveScalar(M.params.custom.recoveryDuration, 'measurements.params.custom.recoveryDuration');
+L = M.params.custom.QossEnd;
+if ~isempty(L) && ~(isnumeric(L) && isscalar(L) && L > 0 && L < 1)
+    fail('measurements.params.custom.QossEnd', 'must be [] or a fraction in (0, 1).');
+end
+mustBeOption(M.params.custom.QossBasis, ["peak", "Vdc"], 'measurements.params.custom.QossBasis');
 L = M.params.custom.didtRR;
 if ~isempty(L) && ~(isnumeric(L) && numel(L) == 2 && all(isfinite(L)) && L(1) ~= L(2))
     fail('measurements.params.custom.didtRR', 'must be [] or two different currents [A].');

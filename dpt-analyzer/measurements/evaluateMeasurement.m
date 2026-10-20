@@ -27,6 +27,12 @@ function results = evaluateMeasurement(def, ctx, S)
 %        other device type's standard (IEC-9 on a MOSFET). If every method
 %        fails, the first failure is returned with the others' reasons
 %        appended.
+%     6. Event-specific methods (method.events, e.g. the #47 dip at
+%        turn-on only) are unavailable on other event kinds, and a method
+%        that reports itself "skipped" (e.g. no capacitance known for the
+%        #47 ringing method) is passed over like an unavailable one
+%        (design 18.1); if nothing else succeeds, the first such skip is
+%        returned.
 %
 %   Presets: a "preset" entry in the preference list is replaced by
 %   def.presets.(IEC8|IEC9) for S.measurements.preset ("auto" follows
@@ -70,6 +76,7 @@ present = [ctx.col.channels.signal];
 why = strings(1, 0);
 passed = struct('method', {}, 'tag', {}, 'reason', {});
 first = [];
+firstSkip = [];
 for id = prefs
     m = def.methods(known == id);
     mismatch = (m.standard == "IEC-8" && cfg.deviceType == "IGBT") || ...
@@ -77,7 +84,7 @@ for id = prefs
     if ~isempty(first) && mismatch
         continue        % a fallback never moves to the other device's standard
     end
-    [ok, sig, missing] = available(m, present, ctx.col, cfg, S);
+    [ok, sig, missing] = available(m, present, ctx, cfg, S);
     if ok
         results = def.fn(def, m, ctx, sig, S);
         for k = 1:numel(results)
@@ -95,6 +102,14 @@ for id = prefs
             end
             passed(end+1) = struct('method', m.id, 'tag', string(results(1).methodTag), ...
                 'reason', string(results(1).reason)); %#ok<AGROW>
+            continue
+        end
+        if all([results.status] == "skipped")
+            % The method found itself inapplicable here: like unavailable.
+            if isempty(firstSkip)
+                firstSkip = results;
+            end
+            why(end+1) = id + ": " + results(1).reason; %#ok<AGROW>
             continue
         end
         if ~isempty(passed) && any([results.status] == "ok")
@@ -115,15 +130,29 @@ if ~isempty(first)
     end
     return
 end
+if ~isempty(firstSkip)
+    results = firstSkip;
+    others = unique(why(~endsWith(why, ": " + firstSkip(1).reason)), 'stable');
+    if ~isempty(others)
+        results(1).reason = results(1).reason + "; other methods: " + strjoin(others, "; ");
+    end
+    return
+end
 results = skipped(def, ctx, "no method available in this collection: " + strjoin(why, "; "));
 
 end
 
 % =====================================================================
-function [ok, sig, missing] = available(m, present, col, cfg, S)
+function [ok, sig, missing] = available(m, present, ctx, cfg, S)
 % Resolve every requirement slot to the first alternative present.
 sig = struct();
 missing = "";
+col = ctx.col;
+if ~isempty(m.events) && ~any(m.events == ctx.kind)
+    ok = false;
+    missing = "a " + strjoin(m.events, " or ") + " event";
+    return
+end
 if m.nominal ~= "" && isempty(cfg.nominal.(m.nominal))
     ok = false;
     missing = "cfg.nominal." + m.nominal;

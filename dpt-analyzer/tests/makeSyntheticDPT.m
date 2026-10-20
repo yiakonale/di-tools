@@ -38,7 +38,12 @@ function truth = makeSyntheticDPT(folder, opts)
 %   the HS diode at each LS turn-on with forward current, a half-Gaussian
 %   rise (sigma tRise) and exponential decay (tFall) peaking delay after
 %   the switching instant; it flows through both devices, so Id-LS gains
-%   it, Id-HS = -(1 - s) I_L + h, and I_L is unchanged).
+%   it, Id-HS = -(1 - s) I_L + h, and I_L is unchanged), vShift ([on off]:
+%   the V_DS transitions lag the current by vShift(1) at turn-on and lead
+%   it by vShift(2) at turn-off, as in hard switching; default [0 0]),
+%   Lloop (switching-loop inductance [H]: Vds-LS gains -Lloop dI_D/dt),
+%   CossHS (HS output capacitance [F]: the HS device carries CossHS
+%   dVds-HS/dt, through both devices, so I_L is unchanged).
 
 if nargin < 2
     opts = struct();
@@ -49,10 +54,13 @@ t = (o.span(1):o.dt:o.span(2))';
 offs = o.ons + o.width;
 gate = zeros(size(t));
 s = zeros(size(t));
+sV = zeros(size(t));                        % switch state seen by the voltages
 for k = 1:numel(o.ons)
     gate = gate + 0.25 * (1 + tanh((t - o.ons(k)) / o.tauGate)) .* (1 - tanh((t - offs(k)) / o.tauGate));
     s = s + 0.25 * (1 + tanh((t - o.ons(k) - o.tdOn) / o.tauSwitch)) .* ...
         (1 - tanh((t - offs(k) - o.tdOff) / o.tauSwitch));
+    sV = sV + 0.25 * (1 + tanh((t - o.ons(k) - o.tdOn - o.vShift(1)) / o.tauSwitch)) .* ...
+        (1 - tanh((t - offs(k) - o.tdOff + o.vShift(2)) / o.tauSwitch));
 end
 vgs = -5 + 23 * gate;
 % Complementary HS gate (synchronous mode): on outside the LS pulses
@@ -87,8 +95,9 @@ vf = (o.vf0 + o.vfSlope * IL) .* (IL > iOn);
 % Rbus times the bus current (the LS current while it conducts).
 vdc = vdc - o.Rbus * s .* IL;
 id = s .* IL;
-vdsLS = (1 - s) .* (vdc + vf) + s .* o.Ron .* IL;
-vdsHS = s .* (vdc - o.Ron * IL) - (1 - s) .* vf;
+vdsLS = (1 - sV) .* (vdc + vf) + sV .* o.Ron .* IL - o.Lloop * gradient(id, o.dt);
+vdsHS = sV .* (vdc - o.Ron * IL) - (1 - sV) .* vf;
+iC = o.CossHS * gradient(vdsHS, o.dt);      % HS output-capacitance current
 
 % Optional parasitic effects on the LS device (stress tests, #29-38):
 % damped sines [amplitude, frequency, tau] starting at each switching
@@ -125,7 +134,7 @@ if ~isempty(o.recovery)
     end
 end
 vdsLS = vdsLS + ringV;
-id = id + ringI + hRR;
+id = id + ringI + hRR + iC;
 vgs = vgs + bumpG;
 vgsHS = vgsHS + bumpN;
 
@@ -139,7 +148,7 @@ end
 
 signals = struct('name', {"Vgs-LS", "Vds-LS", "Id-LS", "Iout", "Vdc", "Vds-HS", "Vds-LS-clamp", "Vgs-HS", "Id-HS"}, ...
     'data', {vgs, vdsLS, idSensor, IL + o.ilOffset, vdc, o.vdsHSGain * vdsHS + o.vdsHSOffset, min(vdsLS, o.clampLevel), vgsHS, ...
-    -(1 - s) .* IL + hRR}, ...
+    -(1 - s) .* IL + hRR + iC}, ...
     'units', {'V', 'V', 'A', 'A', 'V', 'V', 'V', 'V', 'A'});
 if ~isfolder(folder)
     mkdir(folder);
@@ -180,7 +189,9 @@ truth.vgsHS = vgsHS;
 truth.ringV = ringV;
 truth.ringI = ringI;
 truth.hRR = hRR;
-truth.iF = (1 - s) .* IL - hRR;              % HS diode forward current
+truth.iF = (1 - s) .* IL - hRR - iC;         % HS device forward current (diode + C_oss)
+truth.iC = iC;
+truth.sV = sV;
 % Gate instants (swing basis): tanh crossing of 10 % / 90 %.
 truth.g10 = o.ons - o.tauGate * atanh(0.8);
 truth.g90 = offs - o.tauGate * atanh(0.8);
@@ -220,6 +231,9 @@ d.ringI = [];                 % [A f tau] I_D ringing after each turn-on
 d.vgsBump = [];               % [A sigma] active gate overshoot
 d.vgsNBump = [];              % [A sigma] non-active gate cross-talk
 d.recovery = [];              % [A tRise tFall delay] HS diode reverse recovery
+d.vShift = [0 0];             % [s] V_DS lag at turn-on / lead at turn-off
+d.Lloop = 0;                  % [H] switching-loop inductance (on Vds-LS)
+d.CossHS = 0;                 % [F] HS output capacitance
 for f = string(fieldnames(d))'
     if ~isfield(o, f)
         o.(f) = d.(f);

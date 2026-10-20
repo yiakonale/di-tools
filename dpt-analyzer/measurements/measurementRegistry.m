@@ -6,7 +6,8 @@ function R = measurementRegistry()
 %   MEASUREMENT_SPEC.md. Entries are added group by group (Batch 5c-5h);
 %   this version holds the operating point (#1-4), switching energy and
 %   power (#5-12), timing (#13-23), slew rates (#24-28), stress (#29-38),
-%   reverse recovery (#39-46) and conduction (#49-54).
+%   reverse recovery (#39-46), parasitics (#47, #48, #55) and conduction
+%   (#49-54).
 %
 %   Entry fields
 %     id, row, symbol, name, category, unit
@@ -16,7 +17,8 @@ function R = measurementRegistry()
 %     methodKey    field of S.measurements.methods holding the preference
 %                  order ("" = use the registry order)
 %     methods      struct array: id, standard, label, tag, description,
-%                  requires (slots), nominal (cfg.nominal field or "")
+%                  requires (slots), nominal (cfg.nominal field or ""),
+%                  events (event kinds the method applies to; [] = all)
 %     fn           implementation: results = fn(def, method, ctx, sig, S)
 %
 %   Requirement slots: each slot names the signal role it needs, with
@@ -156,6 +158,9 @@ R = addStress(R);
 
 %% Reverse recovery (#39-46) -------------------------------------------------------
 R = addRecovery(R);
+
+%% Parasitics (#47, #48, #55) -------------------------------------------------------
+R = addParasitics(R);
 
 end
 
@@ -440,6 +445,48 @@ R = add(R, presets(entry("didtRR", 46, "di_F/dt", "Reverse-recovery current slew
     "zeroCrossing", "zeroCrossing"));
 end
 
+function R = addParasitics(R)
+% Loop inductance, output charge and parasitic capacitance (design 18).
+% Methods are event specific: the turn-on dip, the turn-off ringing and
+% overshoot. #55 LC takes L from #47 by the dip or overshoot only, and
+% #47 ringing takes C from cfg.circuit.Coss only, so the two never depend
+% on each other in a cycle (design 9, issue 2).
+G = slot("gate", "gateVoltage@active");
+V = slot("V", "drainVoltage@active");
+I = slot("I", "drainCurrent@active");
+IF = slot("IF", ["drainCurrent@nonActive", "outputCurrent"]);
+VN = slot("VN", "drainVoltage@nonActive");
+both = ["turnOn", "turnOff"];
+
+R = add(R, entry("Lloop", 47, "L_loop", "Switching-loop inductance", "Parasitics", "H", both, ...
+    "Lloop", @measureParasitics, [ ...
+    onEvents(method("dip", "Conv", "turn-on dip", ["L = integral of (V_DS,pre - V_DS) dt / Delta I_D over " ...
+        "I_D 10-90 % at turn-on, against V_DS's own pre-switching level (V_DC + V_F: the diode still " ...
+        "conducts during the current rise); the integral avoids differentiating noise"], [V, I, G]), "turnOn")
+    onEvents(busModel(method("dipVdc", "Conv", "turn-on dip vs V_DC", ["as dip, against V_DC(t) before " ...
+        "the edge (the spec's literal (V_DC - V_DS) / (dI_D/dt); includes V_F)"], [V, I, G])), "turnOn")
+    onEvents(method("ringing", "Conv", "turn-off ringing, known C", ["L = 1 / ((2 pi f_r)^2 C), f_r of the " ...
+        "active V_DS ringing after the turn-off peak; C = cfg.circuit.Coss (skipped without it)"], [V, G]), "turnOff")
+    onEvents(method("overshoot", "Conv", "turn-off overshoot", ["L = dV_DS,over (#30) / di/dt (#25) at " ...
+        "turn-off; flagged includesCapacitiveCharging (less reliable)"], [V, I, G]), "turnOff")]));
+R = add(R, entry("Qoss", 48, "Q_oss", "Output charge", "Parasitics", "C", both, ...
+    "Qoss", @measureRecovery, [ ...
+    onEvents(method("zeroTo90", "Conv", "zero crossing to V_DS,N 90 %", ["non-active device current " ...
+        "integrated from its zero crossing at the active turn-on until its V_DS reaches 90 % of its " ...
+        "peak (includes any reverse-recovery charge)"], [IF, VN, G]), "turnOn")
+    onEvents(method("turnOffDischarge", "Conv", "turn-off discharge", ["non-active device current " ...
+        "integrated from the active turn-off gate instant until its V_DS falls to 0: purely capacitive " ...
+        "(its diode conducts only below 0 V), Q_oss(V_DC) free of recovery charge"], [IF, VN, G]), "turnOff")
+    onEvents(method("custom", "Custom", "user end", ["as zeroTo90, ending at params.custom.QossEnd of " ...
+        "the V_DS,N peak or of V_DC (params.custom.QossBasis)"], [IF, VN, G]), "turnOn")], true));
+R = add(R, entry("Cpar", 55, "C_par", "Effective parasitic capacitance", "Parasitics", "F", both, ...
+    "Cpar", @measureParasitics, [ ...
+    onEvents(method("LC", "Conv", "LC model", ["C = 1 / ((2 pi f_r)^2 L): f_r of the active turn-off " ...
+        "ringing, L from #47 by the dip at the same pulse's turn-on, else by the overshoot"], [V, G]), "turnOff")
+    method("charge", "Conv", "Q_oss / dV", ["charge-equivalent C_eq = Q_oss (#48) / its V_DS,N swing " ...
+        "(non-active device)"], [IF, VN, G])]));
+end
+
 function methods = refMethods(role, ownLabel, nominalField)
 % Reference choices of an over- or undershoot.
 sl = [slot("x", role), slot("gate", "gateVoltage@active")];
@@ -583,6 +630,12 @@ m.nominal = string(nominal);
 m.busModel = false;
 m.params = struct();       % declarative definition (thresholds, levels)
 m.requiresCfg = "";        % top-level cfg field the method needs, e.g. "switchingFrequency"
+m.events = strings(1, 0);  % event kinds the method applies to ([] = all of the entry's)
+end
+
+function m = onEvents(m, events)
+% Restrict a method to some event kinds (e.g. the #47 dip: turn-on only).
+m.events = string(events);
 end
 
 function m = busModel(m)

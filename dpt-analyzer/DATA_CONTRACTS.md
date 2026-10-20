@@ -45,6 +45,7 @@ Issues are created with `dptIssue(...)`; `dptIssue()` returns an empty 0×1 arra
 | `cfg.currentNormalization.enable` | logical | no (default `false`) | Opt-in current-sensor normalization (MEASUREMENT_DESIGN.md §7.3). |
 | `cfg.currentNormalization.reference` | `"Iout"` \| `"Id"` | no (default `"Iout"`) | The sensor taken as truth. |
 | `cfg.circuit.Cdc` | double [F] or `[]` | no (default `[]`) | DC-link capacitance, for the charge-droop bus-voltage model (MEASUREMENT_DESIGN.md §12). |
+| `cfg.circuit.Coss` | double [F] or `[]` | no (default `[]`) | Active device's C_oss at the test voltage (datasheet), for L_loop from the turn-off ringing (#47, MEASUREMENT_DESIGN.md §18). |
 | `cfg.circuit.CdcTolerance` | fraction in [0, 1) | no (default 0.2) | Its tolerance; propagated into the V_DC uncertainty. Used only when the bucket has no collection that measures V_DC directly (§12 of the design). |
 | `cfg.zeroOffsetCorrection.enable` | logical | no (default `false`) | Opt-in removal of probe zero offsets measured before pulse 1 (`zeroOffsetCorrection`). |
 | `cfg.voltageNormalization.enable` | logical | no (default `false`) | Opt-in relative V_DS probe-gain calibration from the KVL jump across turn-offs (`normalizeVoltageSensors`, MEASUREMENT_DESIGN.md §15.1). |

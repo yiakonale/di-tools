@@ -15,6 +15,8 @@ function cfg = validateBucketConfig(cfg, S, baseDir)
 %     cfg.currentNormalization.reference     "Iout" ("Iout" | "Id")
 %     cfg.circuit.Cdc                        [] (DC-link capacitance [F])
 %     cfg.circuit.CdcTolerance               0.2 (its tolerance, fraction)
+%     cfg.circuit.Coss                       [] (active device's C_oss at V_DC [F],
+%                                               for L_loop from ringing, #47)
 %     cfg.zeroOffsetCorrection.enable        false
 %     cfg.switchingFrequency                 [] (application f_s [Hz], for P_sw)
 %     cfg.voltageNormalization.enable        false
@@ -135,7 +137,7 @@ end
 if ~isfield(cfg, 'circuit')
     cfg.circuit = struct();
 end
-checkFields(cfg.circuit, strings(1, 0), "cfg.circuit", ["Cdc", "CdcTolerance"]);
+checkFields(cfg.circuit, strings(1, 0), "cfg.circuit", ["Cdc", "CdcTolerance", "Coss"]);
 if ~isfield(cfg.circuit, 'Cdc')
     cfg.circuit.Cdc = [];
 end
@@ -152,6 +154,14 @@ if ~(isnumeric(v) && isscalar(v) && isreal(v) && v >= 0 && v < 1)
     error('dpt:config:invalidValue', 'cfg.circuit.CdcTolerance must be a fraction in [0, 1).');
 end
 cfg.circuit.CdcTolerance = double(v);
+if ~isfield(cfg.circuit, 'Coss')
+    cfg.circuit.Coss = [];
+end
+v = cfg.circuit.Coss;
+if ~isempty(v) && ~(isnumeric(v) && isscalar(v) && isreal(v) && isfinite(v) && v > 0)
+    error('dpt:config:invalidValue', 'cfg.circuit.Coss must be [] or a positive capacitance [F].');
+end
+cfg.circuit.Coss = double(v);
 
 % V_DS probe calibration (optional, opt-in)
 if ~isfield(cfg, 'voltageNormalization')

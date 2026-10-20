@@ -939,3 +939,61 @@ I_rrm, Q_rr, E_rr and di_F/dt are magnitudes. The tag states the diode-current s
 - The phase-leg P_sw now resolves: 134.5 W at pair 2–3 and 578 W at pair 8–9, at f_s = 20 kHz.
 - No other suite changed, except the pulse-1 E_on refusal, which now lists its attempts.
 
+## 18. Batch 5h: parasitics #47, #48, #55 (2026-10-20)
+
+Implemented in `measurements/measureParasitics.m` (#47, #55) and `measureRecovery.m` (#48, which shares the 5g diode-current core); registry `addParasitics`.
+
+### 18.1 Framework additions
+
+- **Event-specific methods:** new method field `events`, checked in `evaluateMeasurement`'s availability test. For example, the #47 dip applies only at turn-on, so a `"preset"` preference picks a method that fits each edge.
+- **Self-skipping methods fall through:** a method whose implementation returns `skipped` is passed over like an unavailable one (no flag). An example is the ringing method without a known C_oss. If nothing else succeeds, the first skip is returned. Noise-limited *failures* still fall back with `methodFallback` (§17.5).
+- **Cross-event context:** `eventContext` now carries `al` and `tl`, and `relatedContext(ctx, edgeIds, kind)` opens another event of the same collection. #55 uses it to take L from the same pulse's turn-on.
+- **New config:** `cfg.circuit.Coss`, the active device's C_oss at the test voltage (datasheet), used for #47 ringing. Settings 0.15.0 add `methods.Lloop` / `Qoss` / `Cpar` and `params.custom.QossEnd` / `QossBasis`.
+
+### 18.2 Methods
+
+| Row | Method | Event | Definition |
+|---|---|---|---|
+| #47 L_loop | `dip` (preset at turn-on) | turn-on | L = ∫(V_DS,pre − V_DS)dt / ΔI_D over I_D 10–90 %. V_DS,pre is V_DS's own pre-switching level, V_DC + V_F, because the diode still conducts while the current rises. The integral equals L·ΔI for any di/dt shape and needs no derivative. Refused if V_DS falls below half its transition in the window, i.e. it is not clamped (hard switching only). |
+| | `dipVdc` | turn-on | The same against V_DC(t): the spec's literal (V_DC − V_DS)/(di/dt). It includes V_F, so it is slightly smaller. |
+| | `ringing` (preset at turn-off) | turn-off | L = 1/((2πf_r)²·C) with C = `cfg.circuit.Coss`; it skips itself without one. f_r comes from `ringingFrequency` on the active V_DS, from its first crossing of the settled level after the #29 peak to the end of the #29 window (the peak lobe carries the L·di/dt bump). Ringing too small for the noise dead band is a noise-limited failure, which falls back. |
+| | `overshoot` | turn-off | dV_DS,over (#30) / di/dt (#25), flagged `includesCapacitiveCharging` |
+| #48 Q_oss (optional) | `zeroTo90` (spec) | turn-on | ∫ of the non-active current from the I_F zero crossing until V_DS,N reaches 90 % of its peak. It includes reverse-recovery charge. |
+| | `turnOffDischarge` (added) | turn-off | ∫I_F from V_DS,N leaving its blocking level (98 %) until it falls to 0 V. This is purely capacitive (the diode conducts only below 0 V), so it gives Q_oss(V_DC) **free of recovery charge**. A derived current is refused if its on-state offset over the window exceeds 25 % of Q. |
+| | `custom` | turn-on | End at `QossEnd` of the V_DS,N peak or of V_DC |
+| #55 C_par | `LC` | turn-off | C = 1/((2πf_r)²·L), with L from #47 by the dip at the same pulse's turn-on, else the overshoot (never ringing, so there is no cycle) |
+| | `charge` | both | C_eq = Q_oss (#48) / its V_DS,N swing; the non-active device's large-signal charge-equivalent C |
+
+### 18.3 [data] Results and findings
+
+**Synthetic** (L = 20 nH, C_HS = 1 nF, V lag/lead 25 ns, ringing 50 MHz):
+
+| Quantity | Truth | Measured |
+|---|---|---|
+| Dip L | 20 nH | 19.98 nH |
+| Ringing L, C_oss = 500 pF | 20.26 nH | 20.39 nH (f_r 49.85 MHz) |
+| Turn-off Q_oss | C·0.98·V = 388.7 nC | 391.3 nC, measured and derived alike |
+| Q_oss/ΔV at turn-on and turn-off | C = 1 nF | within 1 % |
+
+- **LC:** C_par is 510 pF, against 1/((2π·50 MHz)²·20 nH) = 507 pF.
+- **Overshoot method:** about 1.37·L on a tanh edge (peak against average di/dt). With 1 nF of HS capacitance it gives 4.6·L, because the external I_D drops by C·dV/dt before the current fall. That is the spec's "less reliable" caveat, in numbers.
+
+**Example** (derived diode current; all corrections on):
+
+| Pulse | L dip [nH] | L overshoot [nH] | f_r [MHz] | C_par LC [nF] | Q_oss on [nC] | Q_oss off [nC] | C_eq off [pF] | Q_rr (5g) [nC] |
+|---|---|---|---|---|---|---|---|---|
+| 2 | 8.2 | 7.9 | 42.5 | 1.70 | 692 | refused | | 610 |
+| 3 | 7.8 | 7.6 | 47.3 | 1.46 | 671 | 299 | 767 | 637 |
+| 4 | 7.5 | 7.9 | 44.9 | 1.68 | 672 | 330 | 852 | 649 |
+| 5 | 7.0 | 7.5 | 41.0 | 2.14 | 665 | 307 | 800 | 644 |
+| 6 | 7.0 | 7.2 | 44.8 | 1.81 | 707 | 330 | 866 | 654 |
+| 7 | 6.7 | 7.0 | 41.3 | 2.20 | 690 | 375 | 993 | 643 |
+| 8 | 6.7 | 6.3 | 40.8 | 2.26 | 714 | (1158) | | 644 |
+| 9 | 6.6 | (13.5) | (26.2) | | 433 | (2862) | | 432 |
+
+- **L_loop ≈ 7 nH,** from two independent methods that agree within 10 % on pulses 2–8.
+- **Recovery charge separated.** The recovery-free turn-off Q_oss is about 300–375 nC, against about 670–700 nC at turn-on. The 5g "Q_rr ≈ 640 nC" is therefore roughly half the HS device's output charge and half genuine body-diode recovery charge (≈ 330–370 nC).
+- **Two different C's.** The LC C (≈ 1.5–2.2 nF) is about twice the HS C_eq (≈ 0.8–1.0 nF). The turn-off ringing resonates with the *active* LS position, which on this setup is two paralleled devices, and with its small-signal C at V_DC. The HS C_eq is the large-signal charge equivalent of one device. That is why #47 ringing does **not** take its C from #55 charge-based: doing so gave L ≈ 15 nH, twice the dip.
+- **Pulses 8–9:** the turn-off discharge reads 1.2–2.9 µC. That would need ~11 nF at the observed 5 V/ns, so it is impossible: the I_D sensor departs during the fast transient from pulse 8 on (cf. §16.4, §17.4).
+- **Pulse 2:** the derived current is refused there (its 0.8 A offset over the 133 ns window exceeds 25 % of Q).
+- **Measurement limit:** at turn-off the non-active current is only C·dv/dt ≈ 2–10 A, so a derived current with ~2 A noise measures Q_oss coarsely. A probe on the non-active device would measure it directly.

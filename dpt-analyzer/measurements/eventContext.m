@@ -17,8 +17,10 @@ function ctx = eventContext(col, c, ev, al, tl, edgeIds, kind, cfg)
 %              ("capture": the whole record, edgeIds = [])
 %     cfg      bucket configuration
 %
-%   Output ctx: kind, collection, c, col, ev, cfg, offset, edgeIds,
-%   pulseIndex, and edges (1-by-1 or 1-by-2) with, per edge, in the
+%   Output ctx: kind, collection, c, col, ev, al, tl, cfg, offset, edgeIds,
+%   pulseIndex (al and tl let a measurement open a related event, e.g. the
+%   turn-on of the same pulse: relatedContext), and edges (1-by-1 or
+%   1-by-2) with, per edge, in the
 %   collection's CORRECTED time:
 %     edgeId, kind, direction, pulseIndex
 %     time              gate reference crossing
@@ -44,6 +46,8 @@ ctx.collection = col.name;
 ctx.c = c;
 ctx.col = col;
 ctx.ev = ev;
+ctx.al = al;
+ctx.tl = tl;
 ctx.cfg = cfg;
 ctx.offset = al.offset(c);
 ctx.edgeIds = edgeIds;

@@ -46,8 +46,27 @@ function r = measureRecovery(def, method, ctx, sig, S)
 %                  positive
 %     didtRR (#46) |di_F/dt|: line fit through the zero crossing, peak
 %                  |di/dt| during t_b, or between custom levels
+%     Qoss (#48, optional; design 18)
+%       zeroTo90          turn-on: integral of -I_F (the non-active device's
+%                         current) from t0 until V_DS,N reaches 90 % of its
+%                         peak; includes any reverse-recovery charge
+%       custom            as zeroTo90, ending at params.custom.QossEnd of the
+%                         peak or of V_DC
+%       turnOffDischarge  turn-off: integral of I_F from V_DS,N leaving its
+%                         blocking level (98 % of it) until it falls to 0 V.
+%                         Purely capacitive (the diode conducts only below
+%                         0 V): Q_oss(V_DC) free of recovery charge. Starting
+%                         at the voltage fall, not the gate instant, keeps a
+%                         derived current's offset from integrating over
+%                         the turn-off delay; C_oss is smallest at high V,
+%                         so the top 2 % of the swing holds < 2 % of Q
+%     provenance.deltaV is the V_DS,N swing of the window (for #55).
 
 r = makeResult(def, method, ctx);
+if def.id == "Qoss" && method.id == "turnOffDischarge"
+    r = dischargeCharge(r, ctx, sig, S);
+    return
+end
 [rc, r] = recoveryCore(r, ctx, sig, S);
 if isempty(rc)
     return
@@ -70,7 +89,128 @@ switch def.id
         r = recoveryEnergy(r, method, rc, sig, ctx, S);
     case "didtRR"
         r = slewRate(r, method, rc, ctx, S);
+    case "Qoss"
+        r = outputChargeOn(r, method, rc, sig, ctx, S);
 end
+end
+
+% =====================================================================
+function r = outputChargeOn(r, method, rc, sig, ctx, S)
+% #48 at the active turn-on: from the diode current's zero crossing until
+% V_DS,N reaches the end level.
+e = rc.e;
+v = getSignal(ctx.col, sig.VN, [rc.t0 - rc.dt, e.territory(2)], S);
+w = v.t >= rc.t0 & v.t <= e.window(2);
+if nnz(w) < 3
+    r.reason = "the event window ends before the zero crossing";
+    return
+end
+peak = max(v.x(w));
+if method.id == "zeroTo90"
+    level = 0.9 * peak;
+else
+    P = S.measurements.params.custom;
+    if isempty(P.QossEnd)
+        r.status = "skipped";
+        r.reason = "no custom end set (S.measurements.params.custom.QossEnd)";
+        return
+    end
+    if P.QossBasis == "peak"
+        level = P.QossEnd * peak;
+    else
+        bv = busVoltageAt(ctx.col, [rc.g - S.measurements.common.averagingWindow * e.D, rc.g], S);
+        if isnan(bv.value)
+            r.reason = "no bus voltage before the edge";
+            return
+        end
+        level = P.QossEnd * bv.value;
+    end
+end
+c = findCrossing(v.t, v.x, level, "rising", [rc.t0, e.territory(2)], "first");
+if ~c.found
+    r.reason = sprintf('V_DS,N does not rise to %.4g V after the zero crossing', level);
+    return
+end
+s = getSignal(rc.ctxV.col, "diodeCurrent", [rc.t0, c.time] + [-rc.dt, rc.dt], S);
+[Q, info] = integrateBetween(s.t, -s.x, rc.t0, c.time);
+if ~info.complete || isnan(Q)
+    r.reason = "the integration window lies outside the record";
+    return
+end
+r.value = Q;
+r.provenance.window = [rc.t0, c.time] - e.time;
+r.provenance.deltaV = level - interp1(v.t, v.x, rc.t0);
+r.provenance.endLevel = level;
+r = done(r, rc);
+end
+
+% =====================================================================
+function r = dischargeCharge(r, ctx, sig, S)
+% #48 at the active turn-off: the non-active device's output capacitance
+% discharges from V_DC to 0 V before its diode can conduct.
+C = S.measurements.common;
+e = ctx.edges(1);
+g = gateInstant(ctx, e, 0.9, S);
+if ~g.found
+    r.reason = "V_GS 90 %: " + g.reason;
+    return
+end
+[ctxV, src, why] = withDiodeCurrent(ctx, sig, S);
+if why ~= ""
+    r.status = "skipped";
+    r.reason = why;
+    return
+end
+lv = eventLevels(ctx, e, sig.VN, S);
+if ~lv.ok || lv.pre < C.noiseFloorMultiple * lv.sigma
+    r.status = "skipped";
+    r.reason = "the non-active device does not block voltage before the turn-off";
+    return
+end
+v = getSignal(ctx.col, sig.VN, [g.time, e.territory(2)], S);
+a = findCrossing(v.t, v.x, 0.98 * lv.pre, "falling", [], "first");
+if ~a.found
+    r.reason = "V_DS,N does not leave its blocking level after the turn-off";
+    return
+end
+z = findCrossing(v.t, v.x, 0, "falling", [a.time, e.territory(2)], "first");
+if ~z.found
+    r.reason = "V_DS,N does not fall to 0 V after the turn-off (no commutation to the diode)";
+    return
+end
+dt = ctx.col.sampleInterval;
+s = getSignal(ctxV.col, "diodeCurrent", [a.time, z.time] + [-dt, dt], S);
+[Q, info] = integrateBetween(s.t, s.x, a.time, z.time);
+if ~info.complete || isnan(Q)
+    r.reason = "the integration window lies outside the record";
+    return
+end
+if ~(Q > 0)
+    r.reason = "no capacitive discharge charge through the non-active device";
+    r.noiseLimited = true;
+    return
+end
+if src == "derived"
+    % Q5 analogue: a conduction-phase offset of the derived current
+    % integrates over the window; refuse it above derivedMismatch of Q.
+    pre = getSignal(ctxV.col, "diodeCurrent", [g.time - C.averagingWindow * e.D, g.time], S);
+    nD = max(2, round(C.averagingWindow * e.D / dt));
+    sm = movmean(pre.x, nD, 'omitnan');
+    [~, jm] = max(abs(sm));
+    err = abs(sm(jm)) * (z.time - a.time);
+    lim = S.measurements.params.recovery.derivedMismatch * abs(Q);
+    if err > lim
+        r.reason = sprintf(['derived diode current refused: its on-state offset (%.3g A) over the %.3g ns ' ...
+            'window is %.3g nC, more than %g %% of Q_oss'], sm(jm), (z.time - a.time) * 1e9, err * 1e9, ...
+            100 * S.measurements.params.recovery.derivedMismatch);
+        return
+    end
+    r.provenance.conductionMismatch = sm(jm);
+end
+r.value = Q;
+r.provenance.window = [a.time, z.time] - e.time;
+r.provenance.deltaV = 0.98 * lv.pre;
+r = done(r, struct('source', src));
 end
 
 % =====================================================================
