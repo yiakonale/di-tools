@@ -28,7 +28,12 @@ function truth = makeSyntheticDPT(folder, opts)
 %   ilOffset, vdsHSOffset (probe zero offsets of Iout and Vds-HS),
 %   deadTime (of the complementary HS gate, written when "Vgs-HS" is in
 %   channels), vdsHSGain (probe gain error of Vds-HS), Rbus (DC-link and
-%   busbar resistance: the terminal V_DC sags by Rbus * bus current).
+%   busbar resistance: the terminal V_DC sags by Rbus * bus current),
+%   ringV / ringI ([amplitude, frequency, tau]: damped sine added to Vds-LS
+%   after each turn-off / to Id-LS after each turn-on switching instant),
+%   vgsBump ([amplitude, sigma]: Gaussian overshoot of Vgs-LS 3 tauGate
+%   after each turn-on), vgsNBump ([amplitude, sigma]: cross-talk on
+%   Vgs-HS, + at each LS turn-on and - at each turn-off switching instant).
 
 if nargin < 2
     opts = struct();
@@ -80,6 +85,33 @@ id = s .* IL;
 vdsLS = (1 - s) .* (vdc + vf) + s .* o.Ron .* IL;
 vdsHS = s .* (vdc - o.Ron * IL) - (1 - s) .* vf;
 
+% Optional parasitic effects on the LS device (stress tests, #29-38):
+% damped sines [amplitude, frequency, tau] starting at each switching
+% instant, and Gaussian gate bumps [amplitude, sigma].
+ringV = zeros(size(t));
+ringI = zeros(size(t));
+bumpG = zeros(size(t));
+bumpN = zeros(size(t));
+for k = 1:numel(o.ons)
+    if ~isempty(o.ringV)
+        ringV = ringV + damped(t, offs(k) + o.tdOff, o.ringV);
+    end
+    if ~isempty(o.ringI)
+        ringI = ringI + damped(t, o.ons(k) + o.tdOn, o.ringI);
+    end
+    if ~isempty(o.vgsBump)          % active gate overshoot after the turn-on
+        bumpG = bumpG + o.vgsBump(1) * exp(-0.5 * ((t - o.ons(k) - 3 * o.tauGate) / o.vgsBump(2)).^2);
+    end
+    if ~isempty(o.vgsNBump)         % cross-talk: + at the LS turn-on, - at the turn-off
+        bumpN = bumpN + o.vgsNBump(1) * (exp(-0.5 * ((t - o.ons(k) - o.tdOn) / o.vgsNBump(2)).^2) - ...
+            exp(-0.5 * ((t - offs(k) - o.tdOff) / o.vgsNBump(2)).^2));
+    end
+end
+vdsLS = vdsLS + ringV;
+id = id + ringI;
+vgs = vgs + bumpG;
+vgsHS = vgsHS + bumpN;
+
 idSensor = o.idGain * id + o.idOffset;
 if ~isempty(o.idClip)
     idSensor = min(idSensor, o.idClip);
@@ -126,6 +158,10 @@ truth.vf = vf;
 truth.vdsLS = vdsLS;
 truth.vdsHS = vdsHS;
 truth.s = s;
+truth.vgs = vgs;
+truth.vgsHS = vgsHS;
+truth.ringV = ringV;
+truth.ringI = ringI;
 % Gate instants (swing basis): tanh crossing of 10 % / 90 %.
 truth.g10 = o.ons - o.tauGate * atanh(0.8);
 truth.g90 = offs - o.tauGate * atanh(0.8);
@@ -159,10 +195,20 @@ d.ilOffset = 0;               % probe zero offset of Iout [A]
 d.vdsHSOffset = 0;            % probe zero offset of Vds-HS [V]
 d.deadTime = 100e-9;
 d.vdsHSGain = 1;              % probe gain error of Vds-HS
-d.Rbus = 0;                   % DC-link + busbar resistance [Ohm]          % complementary HS gate (channel "Vgs-HS", if listed)
+d.Rbus = 0;                   % DC-link + busbar resistance [Ohm]
+d.ringV = [];                 % [A f tau] V_DS ringing after each turn-off
+d.ringI = [];                 % [A f tau] I_D ringing after each turn-on
+d.vgsBump = [];               % [A sigma] active gate overshoot
+d.vgsNBump = [];              % [A sigma] non-active gate cross-talk
 for f = string(fieldnames(d))'
     if ~isfield(o, f)
         o.(f) = d.(f);
     end
 end
+end
+
+function y = damped(t, t0, p)
+% p = [amplitude, frequency, tau]; zero before t0.
+u = max(t - t0, 0);
+y = p(1) * sin(2 * pi * p(2) * u) .* exp(-u / p(3));
 end

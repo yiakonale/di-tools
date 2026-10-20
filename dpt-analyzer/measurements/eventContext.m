@@ -13,7 +13,8 @@ function ctx = eventContext(col, c, ev, al, tl, edgeIds, kind, cfg)
 %              (turn-off of pulse k, turn-on of pulse k+1). A "pair" is the
 %              same operating point switched off and on again (E_sw, P_sw);
 %              a "break" is the time between them (t_break, V_F, I_F).
-%     kind     "turnOn" | "turnOff" | "pulse" | "break" | "pair"
+%     kind     "turnOn" | "turnOff" | "pulse" | "break" | "pair" | "capture"
+%              ("capture": the whole record, edgeIds = [])
 %     cfg      bucket configuration
 %
 %   Output ctx: kind, collection, c, col, ev, cfg, offset, edgeIds,
@@ -34,7 +35,7 @@ arguments
     al (1,1) struct
     tl (1,1) struct
     edgeIds (1,:) double
-    kind (1,1) string {mustBeMember(kind, ["turnOn", "turnOff", "pulse", "break", "pair"])}
+    kind (1,1) string {mustBeMember(kind, ["turnOn", "turnOff", "pulse", "break", "pair", "capture"])}
     cfg (1,1) struct
 end
 
@@ -71,6 +72,11 @@ for k = 1:numel(edgeIds)
     e.smoothingSamples = row.smoothingSamples;
     edges{k} = e;
 end
-ctx.edges = [edges{:}];
+if isempty(edges)
+    ctx.edges = struct([]);         % "capture": no edge
+    ctx.pulseIndex = [];
+else
+    ctx.edges = [edges{:}];
+end
 
 end

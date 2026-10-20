@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.11.0";
+S.schemaVersion = "0.12.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -438,6 +438,20 @@ S.measurements.methods.EswNonActive  = "preset";
 S.measurements.methods.Pon           = "preset";
 S.measurements.methods.Poff          = "preset";
 S.measurements.methods.Psw           = "preset";
+% Voltage, current and gate stress (#29-38): "preset", or explicit ids.
+% #30, #31 use the window of #29; #33, #34 that of #32. Their methods
+% choose the reference: "ownLevel" (default: the signal's own level at
+% that moment), "busModel" / "Ion" (operating point) or "nominal".
+S.measurements.methods.VdsMax        = "preset";
+S.measurements.methods.dVdsOver      = "preset";
+S.measurements.methods.dVdsUnder     = "preset";
+S.measurements.methods.IdMax         = "preset";
+S.measurements.methods.dIdOver       = "preset";
+S.measurements.methods.dIdUnder      = "preset";
+S.measurements.methods.VgsMax        = "preset";
+S.measurements.methods.VgsMin        = "preset";
+S.measurements.methods.VgsNMin       = "preset";
+S.measurements.methods.VgsNMax       = "preset";
 
 % Method parameters.
 % onStateWindow "delayToEnd": delay after V_DS reaches 10 % at turn-on
@@ -509,6 +523,19 @@ S.measurements.params.energy.fixedDuration = 10e-6;
 % E_io (#8): the window ends this long [s] after the active V_DS has
 % settled (settlingBand of its transition).
 S.measurements.params.Eio.settleDelay = 0;
+
+% V_DS,max (#29) "after90": window length after V_DS reaches 90 %, in D.
+S.measurements.params.stress.after90Window = 2;
+% "Ringing decayed" (#29-38): the settling band is never narrower than the
+% noise, taken from the territory's tail. A tail noise more than this
+% many times the quiet pre-switching noise (max of sigma and the ADC
+% step) is taken as ringing that has not decayed, not as noise, and the
+% pre-switching noise is used instead.
+S.measurements.params.stress.tailNoiseRatio = 3;
+% Custom peak windows (#29, #32): [t0 t1] [s] relative to the gate
+% instant (V_GS 90 % falling / 10 % rising).
+S.measurements.params.custom.VdsMax    = [];
+S.measurements.params.custom.IdMax     = [];
 
 %% Reporting ----------------------------------------------------------
 % Warnings are always collected in the results. This controls whether
@@ -742,6 +769,8 @@ end
 mustBeEmptyOrPositiveScalar(M.params.derivative.windowDuration, 'measurements.params.derivative.windowDuration');
 mustBePositiveScalar(M.params.energy.fixedDuration, 'measurements.params.energy.fixedDuration');
 mustBeNonnegativeScalar(M.params.Eio.settleDelay, 'measurements.params.Eio.settleDelay');
+mustBePositiveScalar(M.params.stress.after90Window, 'measurements.params.stress.after90Window');
+mustBePositiveScalar(M.params.stress.tailNoiseRatio, 'measurements.params.stress.tailNoiseRatio');
 
 % Reporting
 mustBeLogicalScalar(S.report.echoWarnings, 'report.echoWarnings');

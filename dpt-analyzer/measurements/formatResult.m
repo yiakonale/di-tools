@@ -12,6 +12,9 @@ end
 
 if r.status == "ok"
     s = sprintf('%s = %s [%s]', r.symbol, engineering(r.value, r.unit), r.methodTag);
+    if isfield(r.provenance, 'percent') && isfinite(r.provenance.percent)
+        s = sprintf('%s (%+.3g %% of reference)', s, r.provenance.percent);
+    end
     if ~isempty(r.flags)
         s = sprintf('%s {%s}', s, strjoin(r.flags, ", "));
     end

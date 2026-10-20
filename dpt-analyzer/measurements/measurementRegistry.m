@@ -5,8 +5,8 @@ function R = measurementRegistry()
 %   measurement (MEASUREMENT_DESIGN.md section 3). Row numbers refer to
 %   MEASUREMENT_SPEC.md. Entries are added group by group (Batch 5c-5h);
 %   this version holds the operating point (#1-4), switching energy and
-%   power (#5-12), timing (#13-23), slew rates (#24-28) and conduction
-%   (#49-54).
+%   power (#5-12), timing (#13-23), slew rates (#24-28), stress (#29-38)
+%   and conduction (#49-54).
 %
 %   Entry fields
 %     id, row, symbol, name, category, unit
@@ -150,6 +150,9 @@ R = addTimingAndSlew(R);
 
 %% Switching energy and power (#5-12) ------------------------------------------
 R = addEnergy(R);
+
+%% Voltage, current and gate stress (#29-38) -------------------------------------
+R = addStress(R);
 
 end
 
@@ -312,6 +315,77 @@ psw = method("perSwitch", "Conv", "f_s * (E_on + E_off)", ...
 psw.requiresCfg = "switchingFrequency";
 R = add(R, entry("Psw", 12, "P_sw", "Average switching loss", "Switching energy", "W", "pair", ...
     "Psw", @measureEnergy, psw));
+end
+
+function R = addStress(R)
+% Peaks, over- and undershoots, gate stress and cross-talk. Over/undershoot
+% methods choose the REFERENCE (MEASUREMENT_DESIGN.md 15.2); their window is
+% that of the matching peak measurement (#29 for #30/#31, #32 for #33/#34).
+G = "gateVoltage@active";
+GN = "gateVoltage@nonActive";
+V = "drainVoltage@active";
+I = "drainCurrent@active";
+both = ["turnOn", "turnOff"];
+
+R = add(R, entry("VdsMax", 29, "V_DS,max", "Peak drain-source voltage", "Stress", "V", "turnOff", ...
+    "VdsMax", @measureStress, [ ...
+    method("untilSettled", "Conv", "max V_DS until ringing decays", ["maximum V_DS from the turn-off gate " ...
+        "instant until V_DS settles within settlingBand of its settled level (territory end at the latest)"], ...
+        [slot("V", V), slot("gate", G)])
+    method("after90", "Conv", "max V_DS within 2 D after 90 %", ["maximum V_DS within " ...
+        "params.stress.after90Window D after V_DS rises to 90 %"], [slot("V", V), slot("gate", G)])
+    method("custom", "Custom", "max V_DS in user window", "window from S.measurements.params.custom.VdsMax", ...
+        [slot("V", V), slot("gate", G)])]));
+R = add(R, entry("dVdsOver", 30, "dV_DS,over", "Voltage overshoot", "Stress", "V", "turnOff", ...
+    "dVdsOver", @measureStress, refMethods(V, "settled V_DS", "busVoltage")));
+R = add(R, entry("dVdsUnder", 31, "dV_DS,under", "Voltage undershoot", "Stress", "V", both, ...
+    "dVdsUnder", @measureStress, refMethods(V, "own V_DS level", "busVoltage")));
+R = add(R, entry("IdMax", 32, "I_D,max", "Peak drain current", "Stress", "A", "turnOn", ...
+    "IdMax", @measureStress, [ ...
+    method("untilSettled", "Conv", "max I_D until ringing decays", ["maximum I_D from the turn-on gate " ...
+        "instant until I_D settles within settlingBand of its linear trend"], [slot("I", I), slot("gate", G)])
+    method("custom", "Custom", "max I_D in user window", "window from S.measurements.params.custom.IdMax", ...
+        [slot("I", I), slot("gate", G)])]));
+R = add(R, entry("dIdOver", 33, "dI_D,over", "Current overshoot", "Stress", "A", "turnOn", ...
+    "dIdOver", @measureStress, refMethods(I, "settled I_D", "testCurrent")));
+R = add(R, entry("dIdUnder", 34, "dI_D,under", "Current undershoot", "Stress", "A", both, ...
+    "dIdUnder", @measureStress, refMethods(I, "own I_D level", "testCurrent")));
+R = add(R, entry("VgsMax", 35, "V_GS,max", "Peak gate-source voltage", "Stress", "V", [both, "capture"], ...
+    "VgsMax", @measureStress, method("peak", "Conv", "max V_GS", ["maximum V_GS within the device's " ...
+        "own switching window, or over the whole capture; compared with cfg.ratings.VgsMax"], slot("gate", G))));
+R = add(R, entry("VgsMin", 36, "V_GS,min", "Minimum gate-source voltage", "Stress", "V", [both, "capture"], ...
+    "VgsMin", @measureStress, method("peak", "Conv", "min V_GS", ["minimum V_GS within the device's " ...
+        "own switching window, or over the whole capture; compared with cfg.ratings.VgsMin"], slot("gate", G))));
+R = add(R, entry("VgsNMin", 37, "V_GS,N,min", "Non-active device induced minimum V_GS", "Stress", "V", ...
+    "turnOff", "VgsNMin", @measureStress, method("crosstalk", "Conv", "min V_GS,N", ["minimum V_GS of the " ...
+        "non-active device from the turn-off gate instant until the active V_DS settles; compared with " ...
+        "cfg.ratings.VgsMin"], [slot("gateN", GN), slot("V", V), slot("gate", G)])));
+R = add(R, entry("VgsNMax", 38, "V_GS,N,max", "Non-active device induced maximum V_GS", "Stress", "V", ...
+    "turnOn", "VgsNMax", @measureStress, method("crosstalk", "Conv", "max V_GS,N", ["maximum V_GS of the " ...
+        "non-active device from the turn-on gate instant until the active V_DS settles; compared with " ...
+        "cfg.ratings.VgsThMin (parasitic turn-on risk)"], [slot("gateN", GN), slot("V", V), slot("gate", G)])));
+end
+
+function methods = refMethods(role, ownLabel, nominalField)
+% Reference choices of an over- or undershoot.
+sl = [slot("x", role), slot("gate", "gateVoltage@active")];
+if nominalField == "busVoltage"
+    opName = "busModel";
+    opLabel = "V_DC(t)";
+    opDesc = "the bus-voltage model V_DC(t) before the edge";
+else
+    opName = "Ion";
+    opLabel = "I_on/I_off";
+    opDesc = "the operating-point current of the event (#4 I_on at a turn-on, #3 I_off at a turn-off)";
+end
+own = method("ownLevel", "Conv", "vs " + ownLabel, ["relative to the signal's own level at that " ...
+    "moment: the settled level after the edge, or the pre-switching level for a turn-on dip"], sl);
+op = method(opName, "Conv", "vs " + opLabel, "relative to " + opDesc, sl);
+if opName == "busModel"
+    op = busModel(op);
+end
+nom = method("nominal", "Custom", "vs nominal", "relative to cfg.nominal." + nominalField, sl, nominalField);
+methods = [own; op; nom];
 end
 
 function m = energyMethod(id, standard, label, start, stop, set)

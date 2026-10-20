@@ -26,8 +26,8 @@ Every measurement is evaluated **per event**. The event kinds come from the Batc
 
 | Event kind | Defined by | Rows |
 |---|---|---|
-| `turnOn` | A turn-on edge | #2, 4, 5, 10, 13, 15, 17, 20, 24–28, 32–34, 38–48 |
-| `turnOff` | A turn-off edge | #1, 3, 6, 11, 14, 16, 18, 19, 21, 24–31, 37, 55 |
+| `turnOn` | A turn-on edge | #2, 4, 5, 10, 13, 15, 17, 20, 24–28, 31–36, 38–48 |
+| `turnOff` | A turn-off edge | #1, 3, 6, 11, 14, 16, 18, 19, 21, 24–31, 34–37, 55 |
 | `pulse` | A turn-on edge and its turn-off edge (the on-time) | #49–51 |
 | `break` | Turn-off of pulse k → turn-on of pulse k+1 | #22, 52, 53 |
 | `pair` | Turn-off k + turn-on k+1, which is the same operating point in a DPT | #7, 9, 12 |
@@ -772,3 +772,67 @@ On synthetic data, ε = 1.1 % and R = 3 mΩ are recovered as 1.104 % and 3.01 m�
 - **Overshoot / undershoot reference (#30/#31).** Default: the **signal's own level** (user correction; consistent with §13.1). Overshoot at turn-off is measured against the settled post-turn-off V_DS, which is V_DC + V_F; against V_DC it would include V_F. The turn-on dip is measured against the pre-switching V_DS, and the turn-off ringing minimum against the settled level. V_DC,off (bus model) and the nominal V_DC stay selectable. Results are also given as a percentage of the reference, negative below it.
 - **Peaks** (#29, #32, #35–38): the raw sample maximum.
 - **Gate stress (#35/#36):** one result per switching event, plus one whole-capture result per collection.
+
+## 16. Batch 5f: voltage, current and gate stress (2026-10-19)
+
+Implemented in `measurements/measureStress.m`; registry `addStress`. All results follow §15.2.
+
+### 16.1 Rows and windows
+
+| Row | Event | Window (default method first) | Value |
+|---|---|---|---|
+| #29 V_DS,max | turnOff | `untilSettled`: V_GS 90 % → V_DS settled (§16.3), at most the territory end. `after90`: V_DS 90 % + `params.stress.after90Window`·D (2 D). `custom`: `params.custom.VdsMax` from the gate instant | raw max; rated against `VdsMax` |
+| #32 I_D,max | turnOn | `untilSettled`: V_GS 10 % → I_D settled on its local trend. `custom` | raw max |
+| #30 / #33 over | turnOff / turnOn | the #29 / #32 window and peak | peak − reference |
+| #31 V undershoot | turnOff | #29 peak → end of the #29 window | min − reference |
+| | turnOn (dip) | the current rise, I_D 10 % → 90 % (needs I_D; refused otherwise) | min − pre-switching level |
+| #34 I undershoot | turnOn | #32 peak → end of the #32 window | min − reference |
+| | turnOff | I_D 10 % falling → settled + `averagingWindow`·D | min − off-state level |
+| #35 / #36 V_GS,max / min | turnOn, turnOff, capture | the edge's switching window, or the whole record | raw max / min; rated against `VgsMax` / `VgsMin` |
+| #37 V_GS,N,min | turnOff | gate instant → active V_DS settled | raw min; rated against `VgsMin` |
+| #38 V_GS,N,max | turnOn | gate instant → active V_DS settled | raw max; rated against `VgsThMin` (parasitic turn-on) |
+
+A window that ends at the territory rather than because the signal settled is flagged `ringingNotDecayed`. Over/undershoots inherit that flag from #29/#32.
+
+### 16.2 References of over- and undershoots
+
+| Method | Voltage | Current |
+|---|---|---|
+| `ownLevel` (default) | V_DS's own level at the extremum time: the settled level (= V_DC + V_F after a turn-off), or the pre-switching level for the dip | I_D's own level at the extremum time (its ramp, so the ramp since the gate instant is not counted as overshoot) |
+| `busModel` / `Ion` | V_DC(t) before the edge (`busModel` flag) | I_on (#4) at a turn-on |
+| `nominal` | `cfg.nominal.busVoltage` | `cfg.nominal.testCurrent` |
+
+- `eventLevels(ctx, e, name, S, tEval)` gained the optional `tEval`: both level fits are evaluated there instead of at the gate instant. Without it, the pulse-3 "overshoot" was 33.9 A, mostly the ramp; with it, it is the real 26 A above the ramp.
+- `provenance.percent` = 100 · value / |reference|. It is omitted when the reference is within the noise floor (3σ of the level fits), e.g. the 0 A level after a turn-off.
+- **The turn-off current undershoot accepts only `ownLevel`.** The current ends at 0 A; against I_off or the test current the "undershoot" would just restate that current (it was −117 A, −98 %). Other references are skipped with that reason.
+
+### 16.3 "Ringing has decayed" (refines §6.3 for stress windows)
+
+`settlingTime` gives the last exit from a band, so the band must lie above the noise envelope, or a single noise excursion decides the result. Three findings on the example and in the synthetic tests:
+
+1. **The floor is σ·√(2 ln N), not 3σ.** 3σ is exceeded by noise alone in 0.27 % of samples, so a last-exit test over N ≈ 17 000 samples always finds a late excursion. At pulse 3 (I_on 137 A, 2 % band 2.7 A, on-state σ 1.1 A) the I_D window ran to 3.1 µs, and "I_D,max" was the end of the ramp (171.5 A instead of the 165 A recovery peak). With k = max(3, √(2 ln N)) ≈ 4.4 it settles at the core end. Pulses where 2 % exceeds the noise are unchanged.
+2. **σ comes from the tail, unless the tail still rings.** The on-state current sensor is noisier (1.1–1.6 A) than at 0 A, where the signal sits on one or two ADC codes (σ = q/√12 = 0.62 A), so the pre-switching σ is too small. But the MAD of undecayed ringing (≈ 0.74 of its amplitude) would inflate a tail σ until the ringing passed as settled. Rule: use the tail σ unless it exceeds `params.stress.tailNoiseRatio` (3) times the quiet pre-switching noise, max(σ, q); then use the pre-switching σ. A difference-based noise estimate does not work: the noise is band-limited (consecutive samples share a code).
+3. **The ramp trend is local.** A ramping current is compared with a moving least-squares line over `averagingWindow`·D (~25 ringing periods at 50 MHz, D ≈ 0.5 µs), not one line through the tail extrapolated microseconds back, which left a −1.75 A curvature residual near the edge.
+
+Smoothing before the test was rejected: the ringing is at 45–50 MHz (20 ns), so any window long enough to suppress the correlated noise suppresses the ringing too.
+
+These rules live in `measureStress`. The other users of `settlingTime` (#1/#2 settled V_DS, I_on extrapolated, conduction, E_io) still use the plain 2 % band. They are unaffected where 2 % exceeds the noise. **[data] Open point:** the non-default I_on method `extrapolatedId` fails at pulses 1–2 ("does not settle within ±0.04 / ±1.3 A of its trend"). At pulses 3, 4 and 10 it settles at 3.1 / 2.1 / 1.5 µs (pulses 5–9: 0.56–0.59 µs), so its fit window sits near the territory end. Recommendation: move the §16.3 rule into one shared helper used by every settling test.
+
+### 16.4 [data] Results
+
+Synthetic truth: V_DS ringing 60 V / 50 MHz / τ 40 ns, I_D ringing 20 A, gate bumps 3 V (active) and ±6 V (cross-talk). Peaks match truth to 0.05; over/undershoots to 0.3 V / 0.3 A; the busModel reference differs from ownLevel by V_F; ratings flag on both sides; τ = 3 µs is flagged `ringingNotDecayed` with the window at the territory end.
+
+Example (all corrections on; pulses 3 / 9):
+
+| Quantity | Pulse 3 | Pulse 9 |
+|---|---|---|
+| V_DS,max | 442.4 V | 448 V |
+| dV_DS,over (vs settled) | +39.3 V (+9.7 %) | +69.0 V (+18.2 %) |
+| dV_DS,under turn-on dip / turn-off | −41.3 V / −33.5 V | −64.5 V / −12.3 V |
+| I_D,max | 165.1 A | 556.4 A |
+| dI_D,over (vs own ramp) | +26.1 A (+18.8 %) | +35.3 A (+6.8 %) |
+| dI_D,under turn-on / turn-off | −12.6 A / −6.0 A | −18.3 A / −5.8 A |
+| V_GS,max / min (per event) | 17.6 / −5.6 V | 17.6 / −5.4 V |
+| V_GS,N,min / max | −7.8 / +0.4 V | −8.0 / +1.8 V |
+
+Capture: V_GS,max 17.8 V, V_GS,min −5.6 V. The I_D,max peak lies inside the switching core on all 10 pulses. With `VgsThMin` = 1.5 V, pulse 9's cross-talk +1.8 V is flagged `exceedsRating`.

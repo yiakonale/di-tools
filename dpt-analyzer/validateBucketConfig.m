@@ -19,6 +19,7 @@ function cfg = validateBucketConfig(cfg, S, baseDir)
 %     cfg.switchingFrequency                 [] (application f_s [Hz], for P_sw)
 %     cfg.voltageNormalization.enable        false
 %     cfg.voltageNormalization.reference     "active" ("active" | "nonActive")
+%     cfg.ratings.VdsMax, VgsMax, VgsMin, VgsThMin   [] (device ratings [V])
 
 arguments
     cfg (1,1) struct
@@ -28,7 +29,7 @@ end
 
 checkFields(cfg, ["bucketPath", "activeDevice", "deviceType", "expectedPulseCount", "gate"], ...
     "cfg", ["nominal", "currentNormalization", "circuit", "zeroOffsetCorrection", ...
-    "switchingFrequency", "voltageNormalization"]);
+    "switchingFrequency", "voltageNormalization", "ratings"]);
 checkFields(cfg.gate, "nominal", "cfg.gate");
 checkFields(cfg.gate.nominal, ["high", "low"], "cfg.gate.nominal");
 
@@ -171,6 +172,28 @@ cfg.voltageNormalization.reference = textScalar(cfg.voltageNormalization.referen
 if ~any(cfg.voltageNormalization.reference == ["active", "nonActive"])
     error('dpt:config:invalidValue', ...
         'cfg.voltageNormalization.reference must be "active" or "nonActive".');
+end
+
+% Device ratings (optional): fixed limits; a peak beyond one sets the
+% flag "exceedsRating" (#29, #35-38). No transient limits: a gate
+% overvoltage can do damage however briefly it is applied.
+ratingFields = ["VdsMax", "VgsMax", "VgsMin", "VgsThMin"];
+if ~isfield(cfg, 'ratings')
+    cfg.ratings = struct();
+end
+checkFields(cfg.ratings, strings(1, 0), "cfg.ratings", ratingFields);
+for f = ratingFields
+    if ~isfield(cfg.ratings, f)
+        cfg.ratings.(f) = [];
+    end
+    v = cfg.ratings.(f);
+    if ~isempty(v) && ~(isnumeric(v) && isscalar(v) && isreal(v) && isfinite(v))
+        error('dpt:config:invalidValue', 'cfg.ratings.%s must be [] or a finite value [V].', f);
+    end
+    cfg.ratings.(f) = double(v);
+end
+if ~isempty(cfg.ratings.VgsMin) && cfg.ratings.VgsMin >= 0
+    error('dpt:config:invalidValue', 'cfg.ratings.VgsMin is the negative gate limit and must be < 0.');
 end
 
 % Switching frequency of the application (optional), for the average

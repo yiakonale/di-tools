@@ -1,4 +1,4 @@
-function lv = eventLevels(ctx, e, name, S)
+function lv = eventLevels(ctx, e, name, S, tEval)
 %EVENTLEVELS Pre- and post-switching levels of a signal around one edge.
 %
 %   lv = eventLevels(ctx, e, name, S) returns the 0 % / 100 % reference
@@ -15,6 +15,10 @@ function lv = eventLevels(ctx, e, name, S)
 %     post  fit over the final settledPortion of [end of the gate edge,
 %           end of the territory], extrapolated back to the gate instant
 %
+%   lv = eventLevels(ctx, e, name, S, tEval) evaluates both fitted lines
+%   at tEval instead (e.g. at the time of a peak, so a ramping current's
+%   own level is compared at the same moment).
+%
 %   Output struct: pre, post, low, high (min/max of pre, post), amplitude,
 %   direction ("rising"|"falling"), sigma (larger noise of the two fit
 %   segments, noiseLevel), quantStep, gateTime, ok, reason.
@@ -24,6 +28,7 @@ arguments
     e (1,1) struct
     name (1,1) string
     S (1,1) struct
+    tEval double = []
 end
 
 C = S.measurements.common;
@@ -46,6 +51,9 @@ if ~(a.complete && b.complete)
     return
 end
 tail = ceil((1 - C.settledPortion) * b.n):b.n;
+if ~isempty(tEval)
+    t0 = tEval;
+end
 lv.pre = lineAt(a.t, a.x, t0);
 lv.post = lineAt(b.t(tail), b.x(tail), t0);
 lv.low = min(lv.pre, lv.post);

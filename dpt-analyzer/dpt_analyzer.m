@@ -50,6 +50,14 @@ cfg.currentNormalization.reference = "Iout";   % "Iout" | "Id"
 cfg.voltageNormalization.enable    = false;
 cfg.voltageNormalization.reference = "active";  % "active" | "nonActive"
 
+% Optional: device ratings. A measured peak beyond one is flagged
+% "exceedsRating". VgsThMin is the lowest V_GS(th) at the highest T_j,
+% the limit for gate cross-talk on the non-active device.
+% cfg.ratings.VdsMax   = 1200;      % [V]
+% cfg.ratings.VgsMax   = 22;        % [V]
+% cfg.ratings.VgsMin   = -8;        % [V]
+% cfg.ratings.VgsThMin = 1.8;       % [V]
+
 %% DC bus ------------------------------------------------------------
 % The analyzer needs the bus voltage V_DC, which droops during the pulse
 % train as the pulses drain the DC link. It takes V_DC from the first of:
