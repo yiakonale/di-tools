@@ -9,7 +9,8 @@ function result = runPipeline(cfg, S)
 %     5. detect the active gate's transitions in each collection
 %     6. align the collections and build the pulse timeline, then per
 %        collection: zero-offset correction (opt-in), current-sensor
-%        normalization (opt-in) and the bus-voltage model V_DC(t)
+%        normalization (opt-in), V_DS probe calibration (opt-in) and the
+%        bus-voltage model V_DC(t)
 %
 %   A collection that fails steps 4-6 is excluded and reported; the
 %   others continue. The run aborts only if no collection remains.
@@ -103,6 +104,14 @@ end
 %% 6b. Current-sensor normalization (opt-in: cfg.currentNormalization)
 for k = 1:numel(collections)
     [collections(k), iss] = normalizeCurrentSensors(collections(k), k, al, tl, cfg, S);
+    issues = [issues; iss]; %#ok<AGROW>
+end
+
+%% 6b'. V_DS probe calibration (opt-in: cfg.voltageNormalization)
+% After the current normalization (its fit uses the current), before the
+% bus model (KVL, V_F and E_io then use the corrected probe).
+for k = 1:numel(collections)
+    [collections(k), iss] = normalizeVoltageSensors(collections(k), k, al, tl, cfg, S);
     issues = [issues; iss]; %#ok<AGROW>
 end
 

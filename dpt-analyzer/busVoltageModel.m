@@ -259,8 +259,8 @@ if has("drainVoltage@active") && height(P) >= 1
                     '(charge from %s; scales with that sensor''s calibration)'], ...
                     engineering(bm.cEstimate, "F"), bm.currentSignal);
                 if numel(Q) < 3
-                    msg = msg + sprintf([" from only %d points, so without an uncertainty; " ...
-                        "not shared with the bucket's other collections"], numel(Q));
+                    msg = string(msg) + sprintf([' from only %d points, so without an ' ...
+                        'uncertainty; not shared with the bucket''s other collections'], numel(Q));
                 end
                 severity = "info";
                 if ~isempty(bm.C)

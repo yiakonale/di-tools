@@ -167,5 +167,59 @@ check(res.collections(iS).busVoltage.source == "chargeDroop" && abs(res.bucketC.
     res.bucketC.value * 1e3, 100 * res.bucketC.relUncertainty));
 check(abs(rS.value - rF.value) < 2, sprintf('example last turn-off: single %s vs full %s', formatResult(rS), formatResult(rF)));
 
+%% V_DS probe calibration (cfg.voltageNormalization) --------------------------------
+    function res = vpipeline(bucket, ref, Sx)
+        if nargin < 3, Sx = S; end
+        cfg = validateBucketConfig(struct('bucketPath', string(bucket), 'activeDevice', "LS", ...
+            'deviceType', "MOSFET", 'expectedPulseCount', [], ...
+            'gate', struct('nominal', struct('high', 18, 'low', -5)), ...
+            'voltageNormalization', struct('enable', true, 'reference', ref)), Sx, codeDir);
+        res = runPipeline(cfg, Sx);
+    end
+vch = ["Vgs-LS", "Vds-LS", "Vds-HS", "Id-LS", "Iout"];
+b9 = fullfile(root, 'v1');
+makeSyntheticDPT(fullfile(b9, 'A'), struct('channels', vch, 'vdsHSGain', 1.011, 'Rbus', 3e-3, ...
+    'ons', (0:4) * 10e-6, 'span', [-2e-6 52e-6]));
+vz = vpipeline(b9, "active").collections(1).voltageNormalization;
+check(vz.applied && abs(vz.gainError - 0.011) < 2e-4 && abs(vz.busResistance - 3e-3) < 0.3e-3 && vz.adjusted == "Vds-HS", ...
+    sprintf('synthetic: gain error %.4f %% (true 1.1 %%), R = %.3g mOhm (true 3)', 100 * vz.gainError, 1e3 * vz.busResistance));
+res = vpipeline(b9, "nonActive");
+vz = res.collections(1).voltageNormalization;
+gLS = res.collections(1).channels([res.collections(1).channels.signal] == "Vds-LS").corrections.gain;
+check(vz.adjusted == "Vds-LS" && abs(gLS - (1 + vz.gainError)) < 1e-12, 'reference nonActive: Vds-LS adjusted instead');
+b10 = fullfile(root, 'v2');
+makeSyntheticDPT(fullfile(b10, 'A'), struct('channels', vch, 'vdsHSGain', 1.08, ...
+    'ons', (0:4) * 10e-6, 'span', [-2e-6 52e-6]));
+vz = vpipeline(b10, "active").collections(1).voltageNormalization;
+check(~vz.applied && contains(vz.reason, "attenuation"), 'gain error 8 % refused (probe attenuation)');
+b11 = fullfile(root, 'v3');
+makeSyntheticDPT(fullfile(b11, 'A'), struct('channels', vch, 'ons', [0 10e-6], 'span', [-2e-6 22e-6]));
+vz = vpipeline(b11, "active").collections(1).voltageNormalization;
+check(~vz.applied && contains(vz.reason, "three pulses"), 'two pulses: refused');
+b12 = fullfile(root, 'v4');
+makeSyntheticDPT(fullfile(b12, 'A'), struct('channels', ["Vgs-LS", "Vds-LS", "Id-LS"]));
+vz = vpipeline(b12, "active").collections(1).voltageNormalization;
+check(~vz.applied && contains(vz.reason, "Vds-HS"), 'single V_DS: not applied, reported');
+
+% Example: does the calibration explain the pulse-10 E_io deviation?
+cfgV = validateBucketConfig(struct('bucketPath', "data/example", 'activeDevice', "LS", 'deviceType', "MOSFET", ...
+    'expectedPulseCount', 10, 'gate', struct('nominal', struct('high', 18, 'low', -5)), ...
+    'zeroOffsetCorrection', struct('enable', true), 'currentNormalization', struct('enable', true), ...
+    'voltageNormalization', struct('enable', true)), S, codeDir);
+resV = runPipeline(cfgV, S);
+vz = resV.collections(1).voltageNormalization;
+check(vz.applied && abs(vz.gainError - 0.0113) < 0.002 && vz.busResistance > 0, sprintf( ...
+    'example: Vds-HS reads %+.3g %%, DC-link + busbar R = %.3g mOhm', 100 * vz.gainError, 1e3 * vz.busResistance));
+P = resV.tl.pulses;
+ratio = zeros(1, height(P) - 1);
+for p = 2:height(P)
+    a = run(resV, "Eio", 1, P.turnOffEdge(p - 1), "turnOff");
+    b = run(resV, "Eio", 1, P.turnOnEdge(p), "turnOn");
+    e = run(resV, "Esw", 1, [P.turnOffEdge(p - 1), P.turnOnEdge(p)], "pair");
+    ratio(p - 1) = (a.value + b.value) / e.value;
+end
+fprintf('      example after V_DS calibration, (E_io,off + E_io,on) / E_sw per pair: %s\n', sprintf('%.3f ', ratio));
+check(all(ratio >= 1), 'example after calibration: E_io >= E_sw on every pair');
+
 fprintf('\n%d passed, %d failed\n', nPass, nFail);
 end

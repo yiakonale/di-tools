@@ -27,7 +27,8 @@ function truth = makeSyntheticDPT(folder, opts)
 %   (sensor error on Id-LS), idClip (sensor saturation), idInvert,
 %   ilOffset, vdsHSOffset (probe zero offsets of Iout and Vds-HS),
 %   deadTime (of the complementary HS gate, written when "Vgs-HS" is in
-%   channels).
+%   channels), vdsHSGain (probe gain error of Vds-HS), Rbus (DC-link and
+%   busbar resistance: the terminal V_DC sags by Rbus * bus current).
 
 if nargin < 2
     opts = struct();
@@ -72,6 +73,9 @@ for k = 2:numel(t)
     IL(k) = max(IL(k-1) + dI * o.dt, 0);
 end
 vf = (o.vf0 + o.vfSlope * IL) .* (IL > iOn);
+% Resistance of DC link and busbar: the leg's terminal voltage sags by
+% Rbus times the bus current (the LS current while it conducts).
+vdc = vdc - o.Rbus * s .* IL;
 id = s .* IL;
 vdsLS = (1 - s) .* (vdc + vf) + s .* o.Ron .* IL;
 vdsHS = s .* (vdc - o.Ron * IL) - (1 - s) .* vf;
@@ -85,7 +89,7 @@ if o.idInvert
 end
 
 signals = struct('name', {"Vgs-LS", "Vds-LS", "Id-LS", "Iout", "Vdc", "Vds-HS", "Vds-LS-clamp", "Vgs-HS", "Id-HS"}, ...
-    'data', {vgs, vdsLS, idSensor, IL + o.ilOffset, vdc, vdsHS + o.vdsHSOffset, min(vdsLS, o.clampLevel), vgsHS, ...
+    'data', {vgs, vdsLS, idSensor, IL + o.ilOffset, vdc, o.vdsHSGain * vdsHS + o.vdsHSOffset, min(vdsLS, o.clampLevel), vgsHS, ...
     -(1 - s) .* IL}, ...
     'units', {'V', 'V', 'A', 'A', 'V', 'V', 'V', 'V', 'A'});
 if ~isfolder(folder)
@@ -153,7 +157,9 @@ d.idInvert = false;
 d.Cdc = [];
 d.ilOffset = 0;               % probe zero offset of Iout [A]
 d.vdsHSOffset = 0;            % probe zero offset of Vds-HS [V]
-d.deadTime = 100e-9;          % complementary HS gate (channel "Vgs-HS", if listed)
+d.deadTime = 100e-9;
+d.vdsHSGain = 1;              % probe gain error of Vds-HS
+d.Rbus = 0;                   % DC-link + busbar resistance [Ohm]          % complementary HS gate (channel "Vgs-HS", if listed)
 for f = string(fieldnames(d))'
     if ~isfield(o, f)
         o.(f) = d.(f);

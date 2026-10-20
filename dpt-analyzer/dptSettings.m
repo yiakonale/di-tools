@@ -59,7 +59,7 @@ end
 % =====================================================================
 function S = defaultSettings()
 
-S.schemaVersion = "0.10.0";
+S.schemaVersion = "0.11.0";
 
 %% Canonical signals --------------------------------------------------
 % The semantic signal namespace used by channel maps and measurements.
@@ -380,6 +380,10 @@ S.measurements.common.gateBasis = "swing";
 % saturation or droop, which one gain cannot correct).
 S.measurements.normalization.maxResidualRatio = 2;
 S.measurements.normalization.maxGainSpread = 0.02;
+
+% V_DS probe calibration (cfg.voltageNormalization): a relative gain error
+% beyond this is a wrong probe attenuation setting, not a calibration.
+S.measurements.voltageNormalization.maxGainError = 0.05;
 
 % Preset: sets every measurement whose preference below is "preset" to
 % the method of the chosen standard (MEASUREMENT_DESIGN.md section 4).
@@ -703,6 +707,7 @@ mustBePositiveScalar(M.common.resolutionSteps, 'measurements.common.resolutionSt
 mustBeOption(M.common.gateBasis, ["swing", "zero"], 'measurements.common.gateBasis');
 mustBePositiveScalar(M.normalization.maxResidualRatio, 'measurements.normalization.maxResidualRatio');
 mustBePositiveScalar(M.normalization.maxGainSpread, 'measurements.normalization.maxGainSpread');
+mustBeFraction(M.voltageNormalization.maxGainError, 'measurements.voltageNormalization.maxGainError');
 if ~isstring(M.enableOptional)
     fail('measurements.enableOptional', 'must be a string array of measurement ids, or "all".');
 end

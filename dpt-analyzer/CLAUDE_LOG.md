@@ -11,7 +11,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 | 2 | Data contracts → [DATA_CONTRACTS.md](DATA_CONTRACTS.md) | Approved (2026-10-13) |
 | 3 | Import & validation implementation | Approved (2026-10-13) |
 | 4 | Gate detection & synchronization | Implemented; review folded into Batch 5 |
-| 5 | Measurement specification & registry | 5a–5d done; **5e in review** (2026-10-15); 5f–5h to go |
+| 5 | Measurement specification & registry | 5a–5e done (5e confirmed 2026-10-19); V_DS probe calibration added; **5f next**; 5g–5h to go |
 | 6 | Capability-driven analysis | Not started |
 | 7 | Validation & tests | Not started |
 
@@ -26,16 +26,24 @@ _Last session ended 2026-10-15. Every step is committed locally._
   - 5b: primitives;
   - 5c: normalization, operating point #1–4, conduction #49–54, bus-voltage model V_DC(t), zero-offset correction, bucket-measured C;
   - 5d: timing #13–23, slew rates #24–28, IEC presets (confirmed by the user 2026-10-15);
-  - 5e: switching energy and power #5–12. **Awaiting the user's review.** The open observation on the pulse-10 E_io is in the open points.
+  - 5e: switching energy and power #5–12 (confirmed by the user 2026-10-19).
+  - V_DS probe calibration (`normalizeVoltageSensors`), opt-in, 2026-10-19.
 - Remaining in Batch 5: 5f stress (#29–38), 5g reverse recovery (#39–46, plus P_sw phase-leg and #45 E_rr), 5h parasitics (#47, #48, #55).
 - `dpt_analyzer.m` only configures and calls `runPipeline(cfg, S)`, which runs workflow steps 3–6c: import → detection → alignment → timeline → zero-offset correction (opt-in, **on** in the example) → current normalization (opt-in) → bus-voltage model, using C measured in the bucket where possible. The summary states the offsets removed and the V_DC source per collection.
 - Measurements are implemented and tested but **not yet run by the entry script**; that is Batch 6 (`runMeasurements`).
 
 **Before continuing:**
 - Read this log, then [DATA_CONTRACTS.md](DATA_CONTRACTS.md), then the headers of `dptSettings.m` and `sync/*.m`.
-- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy` (38 + 31 + 33 + 39 + 25 + 20 + 34 + 21 cases, plus the settings checks).
+- Re-run the tests to confirm the baseline. With `tests/` on the path, call `test_settings; test_import; test_sync; test_primitives; test_operating_point; test_bus_voltage; test_corrections; test_timing; test_energy` (38 + 31 + 33 + 39 + 25 + 27 + 34 + 21 cases, plus the settings checks).
 
-**Next step (pick up here): Batch 5f**, voltage, current and gate stress (#29–38). Reference levels come from the bus model (#30/#31 reference V_DC,off) and the operating point (#33/#34 reference I_on). Peaks are searched in the territory. #37/#38 (non-active gate cross-talk) are measurable on the example (+1.8 / −8.0 V). Ratings come from new optional `cfg.ratings`. 5e is implemented and awaiting review (design §14). The bus-voltage plan below is kept for reference.
+**Next step (pick up here): Batch 5f**, voltage, current and gate stress (#29–38), per the user's decisions in design §15.2:
+- ratings `VdsMax`/`VgsMax`/`VgsMin`/`VgsThMin` as a boolean `exceedsRating`, no transient limits;
+- over/undershoot measured against the signal's own level by default;
+- the V_DS,max window runs until the ringing decays (or 2·D);
+- raw peaks;
+- gate stress per event plus a whole-capture result.
+
+#37/#38 (non-active gate cross-talk) are measurable on the example (+1.8 / −8.0 V). The bus-voltage plan below is kept for reference.
 
 _Done 2026-10-15:_
 1. **Config:** `cfg.circuit.Cdc` [F] and `cfg.circuit.CdcTolerance` (default 0.2). Settings: a V_DC source preference list (busChannel, kvl, chargeDroop, constant).
@@ -56,9 +64,8 @@ _Done 2026-10-15:_
 
 **Open points:**
 - **`S.alignment.maxResidual` is unset.** Only one bucket, with one collection, exists so far. Calibrate it once a real multi-collection bucket exists: its residuals will show the real shot-to-shot gate jitter.
-- **Possible extension: relative V_DS probe gain.** Vds-LS before pulse 1 and Vds-HS during pulse 1's on-state both measure about V_DC and differ by about 0.7 %. This could be calibrated like the current sensors. Not requested.
 - **Example normalization offset:** b = +0.75 A remains after zero correction. It is below a fifth of one Iout ADC step and so unresolvable; noted only.
-- **E_io at the pulse-10 turn-on** is about 2.5 mJ below its trend (pair ratio E_io / E_sw 1.009 against 1.07–1.12 elsewhere). E_io is a small difference of two ~140 mJ integrals, so it is sensitive to probe gain mismatch at the 1 % level; the 0.7 % V_DS probe difference accounts for about 1 mJ. Worth a look at that waveform; it supports doing the relative V_DS gain calibration.
+- **E_io at the pulse-10 turn-on** remains below its trend. With the V_DS calibration, the pair ratio E_io / E_sw is 1.052 against 1.12–1.17 elsewhere (1.009 without the calibration), so the probe mismatch explains part of it but not all. Worth a look at that waveform.
 
 **Working agreements:**
 - Commit locally after every step. Stage only `dpt-analyzer/` paths: the parent `di/` repo has unrelated modified `.mlx` files.
@@ -87,6 +94,7 @@ _Done 2026-10-15:_
 | `runPipeline.m` | Workflow steps 3–6c as a function (discovery → bus-voltage model); returns the pipeline result. |
 | `zeroOffsetCorrection.m` | Opt-in removal of probe zero offsets from the pre-pulse segment (step 6a). |
 | `bucketCapacitance.m` | Combines the DC-link capacitance measured in the bucket's direct-source collections, for use in its other collections. |
+| `normalizeVoltageSensors.m` | Opt-in relative V_DS probe-gain calibration from the KVL jump across turn-offs; also reports the DC-link + busbar resistance (step 6b′). |
 | `normalizeCurrentSensors.m` | Opt-in I_D / I_L sensor calibration on the on-state segments (pipeline step 6b). |
 | `measurements/measurementRegistry.m` | Measurement and method definitions (slots, tags, implementations). Currently #1–4 and #49–54. |
 | `measurements/evaluateMeasurement.m` | Optional/device gating, method selection by preference and available signals, skip reasons. |
@@ -101,6 +109,20 @@ _Done 2026-10-15:_
 | `tests/` | Informal test scripts (`test_settings`, `test_import`, `test_sync`, `test_primitives`, `test_operating_point`, `test_bus_voltage`, `test_corrections`, `test_timing`, `test_energy`); formalized in Batch 7. |
 
 ## Decision record
+
+### 2026-10-19 — 5e confirmed; V_DS probe calibration; 5f decisions
+
+- **5e confirmed:** method sets, V_DC held in E_io, preset fallback.
+- **Pulse-10 E_io:** the user chose to implement the relative V_DS probe calibration (`normalizeVoltageSensors`, opt-in, reference `"active"` by default).
+  - It fits the KVL jump across every turn-off as d = ε·V_DC − R·I, which separates the probe gain from the DC-link/busbar resistance.
+  - Example: ε = +1.13 % (Vds-HS high), R = 3.45 mΩ, residual 0.51 V rms. Synthetic truth is recovered (1.104 % against 1.1 %, 3.01 mΩ against 3).
+  - The E_io / E_sw pair ratios become 1.12–1.17, with pair 9–10 at 1.052 (from 1.009). That explains part of the observation, not all; it stays open.
+- **Latent bug fixed:** a string-array `sprintf` format in `busVoltageModel`, reached only for a 2-pulse KVL record.
+- **5f decisions (design §15.2):**
+  - **Ratings as fixed values:** `VdsMax` added on top of `VgsMax`/`VgsMin`/`VgsThMin`, with a boolean `exceedsRating`. The user rejected transient V_GS limits: a gate overvoltage can damage the gate however short it is.
+  - **Overshoot/undershoot reference:** the signal's own level by default (the user's correction to my V_DC suggestion).
+  - **Windows and peaks:** the V_DS,max window runs until the ringing decays (or 2·D); peaks are raw; gate stress is reported per event plus a whole-capture result.
+- **Settings 0.11.0.** Tests: `test_corrections` now has 27 cases; all suites pass.
 
 ### 2026-10-15 — Batch 5e: switching energy and power
 

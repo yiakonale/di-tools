@@ -43,6 +43,13 @@ cfg.zeroOffsetCorrection.enable = true;
 cfg.currentNormalization.enable    = false;
 cfg.currentNormalization.reference = "Iout";   % "Iout" | "Id"
 
+% Optional: calibrate the two V_DS probes against each other, from the
+% jump of V_DS,HS + V_DS,LS across every turn-off (needs both V_DS and
+% at least 3 pulses). The reference probe is taken as the truth; with
+% "active", every active-device result stays unchanged.
+cfg.voltageNormalization.enable    = false;
+cfg.voltageNormalization.reference = "active";  % "active" | "nonActive"
+
 %% DC bus ------------------------------------------------------------
 % The analyzer needs the bus voltage V_DC, which droops during the pulse
 % train as the pulses drain the DC link. It takes V_DC from the first of:
@@ -108,6 +115,13 @@ if S.report.verbosity ~= "quiet"
                 nz.reference, nz.adjusted, nz.gain, nz.offset);
         elseif cfg.currentNormalization.enable
             fprintf('  %-16s currents NOT normalized: %s\n', '', nz.reason);
+        end
+        vz = col.voltageNormalization;
+        if vz.applied
+            fprintf('  %-16s V_DS probes normalized: %s reads %+.3g %%, bus resistance %.3g mOhm\n', ...
+                '', vz.adjusted, 100 * vz.gainError, 1e3 * vz.busResistance);
+        elseif cfg.voltageNormalization.enable
+            fprintf('  %-16s V_DS probes NOT normalized: %s\n', '', vz.reason);
         end
         fprintf('  %-16s V_DC(t): %s\n', '', col.busVoltage.description);
         if col.busVoltage.droopDetected

@@ -465,7 +465,7 @@ The spec's per-event options ("settled off-state V_DS", "off-state V_DS before t
   The configuration block in `dpt_analyzer.m` should present the choice in plain words.
 - **Future option: calibration routine.** Run the same pulse train once with a dedicated V_DC channel, to measure the droop-versus-charge curve of the setup exactly. That replaces C_dc ± 20 % with a measured curve for that bucket. Not now.
 
-### 12.3 Related open point
+### 12.3 Related open point (resolved 2026-10-19: §15.1)
 
 **The full-range V_DS probes disagree by about 1 %.** On the example, Vds-HS reads −2.8 V before pulse 1 where the true value is 0 V, and the three V_DC readings around pulse 1 (pre-pulse V_DS, on-state KVL, break KVL) differ by 3–4 V. Any V_DS-based V_DC is therefore absolute only to about 1 %, the same size as V_F. A possible later opt-in: zero-offset correction of the non-active V_DS from the pre-pulse segment, where it must read 0.
 
@@ -734,3 +734,41 @@ The first version used the first method only, so E_sw,N never tried its indirect
 **Why E_io is fragile.** It is a **small difference of two large integrals**: at pulse 10, 150.5 mJ − 136.9 mJ. A 1 % relative error between the probes therefore moves it by about 1.4 mJ. The measured 0.7 % gain difference between the two V_DS probes (§12.3) alone accounts for about 1 mJ. This makes the V_DS-probe relative-gain calibration more than cosmetic. The pulse-10 deviation is logged as an open observation.
 
 Checked and ruled out: Iout clipping. Its 1375 samples at the 638 A maximum are the freewheel plateau after the last pulse, not saturation.
+
+## 15. V_DS probe calibration and the 5f decisions (2026-10-19)
+
+### 15.1 Relative V_DS probe gain (`normalizeVoltageSensors`, opt-in)
+
+This was the open point in §12.3; the user chose to implement it.
+
+**Principle.** By KVL, V_DS,A + V_DS,N = V_DC at every settled moment. Across each turn-off the two probes swap roles: in the on-state V_DS,N carries nearly all of V_DC, in the break V_DS,A does. V_DC is continuous across the turn-off (the break draws no charge from the link), except that the resistive drop R·I of the DC link and busbar disappears when the bus current stops. With V_DS,N reading (1 + ε) times its true value, the jump of the measured sum at turn-off k is
+
+> d_k = ε·V_DC − R·I_k.
+
+**Method.**
+
+- Both sums are straight-line fits of their segments, evaluated just before the turn-off, so the zero offsets cancel.
+- ε and R are fitted over all pulses. ε scales with V_DC and R with the current, which varies tenfold across a multi-pulse train, so the two separate.
+- The correction is a declared gain on the **non-reference** probe. The reference (`cfg.voltageNormalization.reference`) defaults to `"active"`, so every active-device result stays unchanged.
+- **Refused** with fewer than 3 pulses, or if |ε| > 5 % (`maxGainError`), which points to a wrong attenuation setting rather than a calibration.
+- Pipeline step 6b′: after current normalization, before the bus model, so KVL, V_F and E_io use the corrected probe.
+
+**[data] Example.**
+
+| Quantity | Value |
+|---|---|
+| ε (Vds-HS relative to Vds-LS) | +1.13 % (the earlier 0.7 % was a rough, droop-biased estimate) |
+| R (DC link + busbar) | 3.45 mΩ |
+| Fit residual | 0.51 V rms (0.84 V without R) |
+
+On synthetic data, ε = 1.1 % and R = 3 mΩ are recovered as 1.104 % and 3.01 mΩ.
+
+**Effect on the E_io check.** (E_io,off + E_io,on) / E_sw becomes 1.12–1.17 on pairs 1–8 (from 1.07–1.12). Pair 9–10 rises from 1.009 to 1.052. The probe mismatch explains part of the pulse-10 deviation, but that pair stays about 10 % below the trend; it remains an open observation.
+
+### 15.2 Decisions for 5f (stress, #29–38)
+
+- **Ratings** (new optional `cfg.ratings`): fixed values `VdsMax`, `VgsMax`, `VgsMin`, `VgsThMin`. A peak beyond a rating sets the boolean flag `exceedsRating`. There are **no transient limits or durations**: the user's view is that a gate overvoltage can do damage however briefly it is applied.
+- **V_DS,max window (#29).** Default: the turn-off window until the ringing decays (V_DS within the settling band), capped at the territory. The "fixed time after V_DS 90 %" option uses 2·D.
+- **Overshoot / undershoot reference (#30/#31).** Default: the **signal's own level** (user correction; consistent with §13.1). Overshoot at turn-off is measured against the settled post-turn-off V_DS, which is V_DC + V_F; against V_DC it would include V_F. The turn-on dip is measured against the pre-switching V_DS, and the turn-off ringing minimum against the settled level. V_DC,off (bus model) and the nominal V_DC stay selectable. Results are also given as a percentage of the reference, negative below it.
+- **Peaks** (#29, #32, #35–38): the raw sample maximum.
+- **Gate stress (#35/#36):** one result per switching event, plus one whole-capture result per collection.
