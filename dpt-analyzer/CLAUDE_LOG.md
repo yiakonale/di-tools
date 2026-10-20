@@ -17,7 +17,7 @@ Newest entries go at the top of each section. Every completed step is committed 
 
 ## Resume here
 
-_Last updated 2026-10-19. Every step is committed locally._
+_Last session ended 2026-10-19 after 5g. Every step is committed locally; the user pushes. To resume, ask Claude to "resume the DPT analyzer from the log", then answer the three 5g decisions below._
 
 **State:**
 - Batches 1–4 are done.
